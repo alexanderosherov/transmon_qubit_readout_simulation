@@ -1,3 +1,5 @@
+from abc import ABC
+
 import numpy as np
 import skrf as rf
 from matplotlib import pyplot as plt
@@ -35,16 +37,17 @@ class Pulse:
         # predefined data, it does nothing.
         pass
 
-    def _to_frequency_domain(self, time_signal: np.ndarray, dt: float):
+    @staticmethod
+    def to_frequency_domain(time_signal: np.ndarray, dt: float, pulse_samples_number: int = 2 ** 23, ):
         yf = np.fft.fft(time_signal)
-        xf = np.fft.fftfreq(self.pulse_samples_number, dt)
+        xf = np.fft.fftfreq(pulse_samples_number, dt)
 
         f_signal_shifted = np.fft.fftshift(yf)
         f_signal_frequencies_shifted = np.fft.fftshift(xf)
         return f_signal_shifted, f_signal_frequencies_shifted
 
     @staticmethod
-    def _to_time_domain(frequency_signal: np.ndarray) -> np.ndarray:
+    def to_time_domain(frequency_signal: np.ndarray) -> np.ndarray:
         # Inverse shift the frequency domain signal
         ifft_shifted_data = np.fft.ifftshift(frequency_signal)
         # Perform inverse FFT
@@ -52,7 +55,7 @@ class Pulse:
         return t_signal
 
     @staticmethod
-    def _get_s_parameter(pulse_freqs: np.ndarray, ntw: rf.Network, param_index: tuple):
+    def get_s_parameter(pulse_freqs: np.ndarray, ntw: rf.Network, param_index: tuple):
         # Extract original S-parameter and frequencies from the network
         s_param_original = ntw.s[:, param_index[0], param_index[1]]
         frequencies_original = ntw.f
@@ -86,7 +89,6 @@ class Pulse:
         f_min = self.f_signal_frequencies.min()
         f_max = self.f_signal_frequencies.max()
 
-
         t_plot_lims = plot_t_edges if plot_t_edges is not None else (t_min, t_max)
         f_plot_lims = plot_f_edges if plot_f_edges is not None else (f_min, f_max)
 
@@ -109,16 +111,22 @@ class Pulse:
         plt.show()
 
 
-class RectangleReadoutPulse(Pulse):
-    def __init__(self, carrier_frequency: float, pulse_width: float,
-                 pulse_amplitude: float, total_signal_time: float,
-                 pulse_samples_number: int = 2 ** 23):
+class ReadoutPulse(Pulse, ABC):
+    def __init__(self, pulse_duration: float, pulse_samples_number: int):
         super().__init__(pulse_samples_number=pulse_samples_number)
+        self.pulse_duration = pulse_duration
+
+
+class RectangleReadoutPulse(ReadoutPulse):
+    def __init__(self, carrier_frequency: float, pulse_duration: float,
+                 pulse_power_dbm: float, total_signal_time: float,
+                 pulse_samples_number: int = 2 ** 23):
+        super().__init__(pulse_duration=pulse_duration, pulse_samples_number=pulse_samples_number)
         self.carrier_frequency = carrier_frequency
-        self.pulse_width = pulse_width
-        self.pulse_amplitude = pulse_amplitude
+        self.pulse_duration = pulse_duration
+        self.pulse_amplitude = self._dbm_to_amplitude(pulse_power_dbm)
         self.total_signal_time = total_signal_time
-        self.pulse_start_time = (self.total_signal_time - self.pulse_width) / 2 # Store for plotting
+        self.pulse_start_time = (self.total_signal_time - self.pulse_duration) / 2  # Store for plotting
 
         self.create_pulse()
 
@@ -126,24 +134,48 @@ class RectangleReadoutPulse(Pulse):
         dt = self.total_signal_time / self.pulse_samples_number
         t_signal_times = np.linspace(0, self.total_signal_time, self.pulse_samples_number, endpoint=False)
 
-        pulse_start_time = (self.total_signal_time - self.pulse_width) / 2
+        pulse_start_time = (self.total_signal_time - self.pulse_duration) / 2
         t_signal_base = np.zeros(self.pulse_samples_number, dtype=complex)
         condition = (t_signal_times >= pulse_start_time) & \
-                    (t_signal_times < pulse_start_time + self.pulse_width)
+                    (t_signal_times < pulse_start_time + self.pulse_duration)
         t_signal_base[condition] = self.pulse_amplitude
 
         self.t_signal = t_signal_base * np.exp(1j * self.carrier_frequency * 2 * np.pi * t_signal_times)
         self.t_signal_times = t_signal_times
 
-        self.f_signal, self.f_signal_frequencies = self._to_frequency_domain(self.t_signal, dt)
+        self.f_signal, self.f_signal_frequencies = self.to_frequency_domain(self.t_signal, dt,
+                                                                            self.pulse_samples_number)
+
+    @staticmethod
+    def _dbm_to_amplitude(power_dbm: float, impedance_ohms: float = 50.0) -> float:
+        """
+        Converts power in dBm to peak voltage amplitude.
+
+        Args:
+            power_dbm (float): Power in dBm.
+            impedance_ohms (float): System impedance in Ohms (default is 50 Ohm).
+
+        Returns:
+            float: Peak voltage amplitude.
+        """
+        # Convert power from dBm to Watts
+        power_watts = 10 ** ((power_dbm - 30) / 10)
+
+        # Calculate RMS voltage: P = V_rms^2 / R  => V_rms = sqrt(P * R)
+        voltage_rms = np.sqrt(power_watts * impedance_ohms)
+
+        # Calculate peak voltage (assuming sinusoidal signal): V_peak = V_rms * sqrt(2)
+        voltage_peak = voltage_rms * np.sqrt(2)
+
+        return voltage_peak
 
 
 class ReflectedPulse(Pulse):
     def __init__(self, original_pulse: Pulse, ntw: rf.Network):
-        s11_at_pulse_freq = self._get_s_parameter(original_pulse.f_signal_frequencies, ntw, param_index=(0, 0))
+        s11_at_pulse_freq = self.get_s_parameter(original_pulse.f_signal_frequencies, ntw, param_index=(0, 0))
 
         reflected_f_signal = original_pulse.f_signal * s11_at_pulse_freq
-        reflected_t_signal = self._to_time_domain(reflected_f_signal)
+        reflected_t_signal = self.to_time_domain(reflected_f_signal)
 
         super().__init__(
             t_signal=reflected_t_signal,
@@ -159,10 +191,10 @@ class ReflectedPulse(Pulse):
 
 class TransitedPulse(Pulse):
     def __init__(self, original_pulse: Pulse, ntw: rf.Network):
-        s21_at_pulse_freq = self._get_s_parameter(original_pulse.f_signal_frequencies, ntw, param_index=(1, 0))
+        s21_at_pulse_freq = self.get_s_parameter(original_pulse.f_signal_frequencies, ntw, param_index=(1, 0))
 
         transmitted_f_signal = original_pulse.f_signal * s21_at_pulse_freq
-        transmitted_t_signal = self._to_time_domain(transmitted_f_signal)
+        transmitted_t_signal = self.to_time_domain(transmitted_f_signal)
 
         super().__init__(
             t_signal=transmitted_t_signal,

@@ -4,17 +4,26 @@ from joblib import Parallel, delayed, cpu_count
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from pulse import Pulse, TransitedPulse, ReflectedPulse
+from pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
+
+"""
+Fidelity simulation based on the paper
+
+Wong, Hiu Yung, Prabjot Dhillon, Kristin M. Beck, and Yaniv J. Rosen. 2023. 
+“A Simulation Methodology for Superconducting Qubit Readout Fidelity.” 
+Solid-State Electronics 201 (March):108582. https://doi.org/10.1016/j.sse.2022.108582.
+"""
 
 
 class FidelitySimulation:
     def __init__(self,
-                 readout_pulse: Pulse,
+                 readout_pulse: ReadoutPulse,
                  s_parameters_file_state_0: str,
                  s_parameters_file_state_1: str,
                  IQ_projection_frequency: int,
                  readout_type: str = "transition",
                  num_iterations: int = 50,
+                 noise_parameters: dict = None
                  ):
         # readout_type can be 'transition' or 'reflection'
 
@@ -24,6 +33,28 @@ class FidelitySimulation:
         self.readout_type = readout_type
         self.IQ_projection_frequency = IQ_projection_frequency
         self.num_iterations = num_iterations
+
+        # Noise parameters based on the paper
+        if noise_parameters is None:
+            noise_parameters = {
+                'quantum_noise': {
+                    'type': 'quantum',
+                    'T_ns': 0.5,  # K, from paper
+                },
+                'thermal_noise_room_temp': {
+                    'type': 'thermal',
+                    'T_eff': 1.5,  # K, from paper
+                    'bandwidth': 6e9,  # Hz (6 GHz), from paper
+                    'resistance': 50.0  # Ohms, common impedance
+                },
+                'thermal_noise_hemt': {
+                    'type': 'thermal',
+                    'T_eff': 54,  # K, from paper
+                    'bandwidth': 6e9,  # Hz (6 GHz), from paper
+                    'resistance': 50.0  # Ohms
+                }
+            }
+        self.noise_parameters = noise_parameters
 
     def run(self):
         ntw_state_0 = rf.Network(self.s_parameters_file_state_0)
@@ -41,20 +72,49 @@ class FidelitySimulation:
         I_state_0, Q_state_0 = self._IQ_projection_homodyne_demodulation(signal_from_system=signal_state_0)
         I_state_1, Q_state_1 = self._IQ_projection_homodyne_demodulation(signal_from_system=signal_state_1)
 
-
-        plt.scatter(I_state_0, Q_state_0)
-        plt.scatter(I_state_1, Q_state_1)
+        plt.scatter(I_state_0, Q_state_0, label="|0>")
+        plt.scatter(I_state_1, Q_state_1, label="|1>")
         plt.xlabel('I')
         plt.ylabel('Q')
         plt.title('IQ Projection for State 0 and State 1')
         plt.grid(True)
-        plt.show() # Added plt.show() to display the plot
+        plt.legend()
+        plt.show()
 
+    # Noise independent of signal power
+    def _create_noise(self, signal_from_system: Pulse) -> np.ndarray:
+        k = 1.3806e-23  # Boltzmann constant (J/K)
 
-    @staticmethod
-    def _create_noise(signal_from_system: Pulse):
-        noise_amplitude = 3.5 * 10 ** (-4)
-        return np.random.normal(0, 1, size=len(signal_from_system.t_signal)) * noise_amplitude
+        signal_length = len(signal_from_system.t_signal)
+
+        total_noise = np.zeros(signal_length)
+
+        for noise_name, params in self.noise_parameters.items():
+            noise_type = params['type']
+            R = params.get('resistance', 50.0)  # Use individual resistance if defined, else 50
+
+            if noise_type == 'quantum':
+                T_ns = params.get('T_ns')
+
+                # Bandwidth for quantum noise is 1/tp (from paper)
+                # pulse_duration is in seconds but needed in ns
+                B_quantum = 1.0 / (self.readout_pulse.pulse_duration * 10 ** 9)
+
+                P_N_quantum = k * T_ns * B_quantum
+                sigma = np.sqrt(P_N_quantum * R)
+
+            elif noise_type == 'thermal':
+                T_eff = params.get('T_eff')
+                bandwidth = params.get('bandwidth')
+
+                sigma = np.sqrt(4 * k * T_eff * bandwidth * R)
+
+            else:
+                raise ValueError(f"Unknown noise type: {noise_type}")
+
+            total_noise += np.random.normal(0, sigma, size=signal_length)
+
+        return total_noise
 
     def _IQ_projection_homodyne_demodulation(self, signal_from_system: Pulse):
         pulse_start = int(np.argmax(self.readout_pulse.t_signal > 0))
