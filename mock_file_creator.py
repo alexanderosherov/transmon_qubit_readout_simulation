@@ -1,9 +1,10 @@
 import skrf as rf
 import os
 
-def shift_s2p_freq_axis_minimal(input_fp: str, output_fp: str, freq_shift_hz: float):
+
+def shift_s2p_freq_axis_minimal(input_fp: str, output_fp: str, freq_shift_Ghz: float):
     ntwk = rf.Network(input_fp)
-    ntwk.f = ntwk.f + freq_shift_hz
+    ntwk.f = ntwk.f / (10 ** 9) + freq_shift_Ghz
 
     output_dir = os.path.dirname(output_fp)
     if output_dir and not os.path.exists(output_dir): os.makedirs(output_dir, exist_ok=True)
@@ -19,7 +20,7 @@ if __name__ == "__main__":
     in_file_path = os.path.join(data_dir_path, IN_FILE)
     out_file_path = os.path.join(data_dir_path, OUT_FILE)
 
-    SHIFT = 156 * 10**3
+    SHIFT = 156 * 10 ** (-6)
 
     shift_s2p_freq_axis_minimal(in_file_path, out_file_path, SHIFT)
     print("DONE")

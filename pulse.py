@@ -7,7 +7,7 @@ from scipy.interpolate import interp1d
 
 
 class Pulse:
-    def __init__(self, pulse_samples_number: int = 2 ** 23,
+    def __init__(self, pulse_samples_number: int,
                  t_signal: np.ndarray = None, t_signal_times: np.ndarray = None,
                  f_signal: np.ndarray = None, f_signal_frequencies: np.ndarray = None):
         if not (t_signal is None and t_signal_times is None and f_signal is None and f_signal_frequencies is None):
@@ -38,7 +38,7 @@ class Pulse:
         pass
 
     @staticmethod
-    def to_frequency_domain(time_signal: np.ndarray, dt: float, pulse_samples_number: int = 2 ** 23, ):
+    def to_frequency_domain(time_signal: np.ndarray, dt: float, pulse_samples_number: int):
         yf = np.fft.fft(time_signal)
         xf = np.fft.fftfreq(pulse_samples_number, dt)
 
@@ -61,11 +61,10 @@ class Pulse:
         frequencies_original = ntw.f
 
         # Interpolate S-parameter (real and imaginary parts separately)
-        # Use bounds_error=False and fill_value=0 as specified
         interp_s_param_real = interp1d(frequencies_original, np.real(s_param_original),
-                                       kind='cubic', bounds_error=False, fill_value=0)
+                                       kind='linear', bounds_error=False, fill_value=0)
         interp_s_param_imag = interp1d(frequencies_original, np.imag(s_param_original),
-                                       kind='cubic', bounds_error=False, fill_value=0)
+                                       kind='linear', bounds_error=False, fill_value=0)
 
         s_param_interpolated_real = interp_s_param_real(pulse_freqs)
         s_param_interpolated_imag = interp_s_param_imag(pulse_freqs)
@@ -82,21 +81,13 @@ class Pulse:
             print("Cannot plot frequency domain pulse: f_signal or f_signal_frequencies is not populated.")
             return
 
-        fig, ax = plt.subplots(2, 1, figsize=(4, 2))
-
-        t_min = self.t_signal_times.min()
-        t_max = self.t_signal_times.max()
-        f_min = self.f_signal_frequencies.min()
-        f_max = self.f_signal_frequencies.max()
-
-        t_plot_lims = plot_t_edges if plot_t_edges is not None else (t_min, t_max)
-        f_plot_lims = plot_f_edges if plot_f_edges is not None else (f_min, f_max)
+        fig, ax = plt.subplots(2, 1, figsize=(8, 6))
 
         ax[0].plot(self.t_signal_times, np.real(self.t_signal))
         ax[0].set_title('Time Domain')
         ax[0].set_xlabel('Time (s)')
         ax[0].set_ylabel('Amplitude')
-        ax[0].set_xlim(t_plot_lims)
+        ax[0].set_xlim(plot_t_edges)
         ax[0].grid(True)
         ax[0].tick_params(axis='x', labelrotation=45)
 
@@ -104,7 +95,7 @@ class Pulse:
         ax[1].set_title('Magnitude Spectrum')
         ax[1].set_xlabel('Frequency (Hz)')
         ax[1].set_ylabel('Magnitude')
-        ax[1].set_xlim(f_plot_lims)
+        ax[1].set_xlim(plot_f_edges)
         ax[1].grid(True)
 
         plt.tight_layout()
@@ -146,6 +137,11 @@ class RectangleReadoutPulse(ReadoutPulse):
         self.f_signal, self.f_signal_frequencies = self.to_frequency_domain(self.t_signal, dt,
                                                                             self.pulse_samples_number)
 
+    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None):
+        plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
+        plot_t_edges = (self.pulse_start_time * 0.99, (self.pulse_start_time + self.pulse_duration) * 1.01)
+        super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges)
+
     @staticmethod
     def _dbm_to_amplitude(power_dbm: float, impedance_ohms: float = 50.0) -> float:
         """
@@ -181,7 +177,8 @@ class ReflectedPulse(Pulse):
             t_signal=reflected_t_signal,
             t_signal_times=original_pulse.t_signal_times,
             f_signal=reflected_f_signal,
-            f_signal_frequencies=original_pulse.f_signal_frequencies
+            f_signal_frequencies=original_pulse.f_signal_frequencies,
+            pulse_samples_number=original_pulse.pulse_samples_number
         )
 
     def create_pulse(self):
@@ -200,7 +197,8 @@ class TransitedPulse(Pulse):
             t_signal=transmitted_t_signal,
             t_signal_times=original_pulse.t_signal_times,
             f_signal=transmitted_f_signal,
-            f_signal_frequencies=original_pulse.f_signal_frequencies
+            f_signal_frequencies=original_pulse.f_signal_frequencies,
+            pulse_samples_number=original_pulse.pulse_samples_number
         )
 
     def create_pulse(self):
