@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
+from utils import UnitConverter
 
 """
 Fidelity simulation based on the paper
@@ -16,16 +17,17 @@ Solid-State Electronics 201 (March):108582. https://doi.org/10.1016/j.sse.2022.1
 
 
 class FidelitySimulation:
-    def __init__(self,
-                 readout_pulse: ReadoutPulse,
-                 s_parameters_file_state_0: str,
-                 s_parameters_file_state_1: str,
-                 IQ_projection_frequency: int,
-                 readout_type: str = "transition",
-                 num_iterations: int = 50,
-                 noise_parameters: dict = None
-                 ):
-        # readout_type can be 'transition' or 'reflection'
+    def __init__(
+            self,
+            readout_pulse: ReadoutPulse,
+            s_parameters_file_state_0: str,
+            s_parameters_file_state_1: str,
+            IQ_projection_frequency: int,
+            readout_type: str = "transition",
+            num_iterations: int = 50,
+            noise_parameters: dict = None,
+    ):
+        # readout_type can be "transition" or "reflection"
 
         self.s_parameters_file_state_0 = s_parameters_file_state_0
         self.s_parameters_file_state_1 = s_parameters_file_state_1
@@ -37,21 +39,21 @@ class FidelitySimulation:
         # Noise parameters based on the paper
         if noise_parameters is None:
             noise_parameters = {
-                'quantum_noise': {
-                    'type': 'quantum',
-                    'T_ns': 0.5,  # K, from paper
+                "quantum_noise": {
+                    "type": "quantum",
+                    "T_ns": 0.5,  # K, from paper
                 },
-                'thermal_noise_room_temp': {
-                    'type': 'thermal',
-                    'T_eff': 1.5,  # K, from paper
-                    'bandwidth': 6e9,  # Hz (6 GHz), from paper
-                    'resistance': 50.0  # Ohms, common impedance
+                "thermal_noise_room_temp": {
+                    "type": "thermal",
+                    "T_eff": 1.5,  # K, from paper
+                    "bandwidth": 6e9,  # Hz (6 GHz), from paper
+                    "resistance": 50.0  # Ohms, common impedance
                 },
-                'thermal_noise_hemt': {
-                    'type': 'thermal',
-                    'T_eff': 54,  # K, from paper
-                    'bandwidth': 6e9,  # Hz (6 GHz), from paper
-                    'resistance': 50.0  # Ohms
+                "thermal_noise_hemt": {
+                    "type": "thermal",
+                    "T_eff": 54,  # K, from paper
+                    "bandwidth": 6e9,  # Hz (6 GHz), from paper
+                    "resistance": 50.0  # Ohms
                 }
             }
         self.noise_parameters = noise_parameters
@@ -61,11 +63,15 @@ class FidelitySimulation:
         ntw_state_1 = rf.Network(self.s_parameters_file_state_1)
 
         if self.readout_type == "transition":
-            signal_state_0 = TransitedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_0)
-            signal_state_1 = TransitedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_1)
+            signal_state_0 = TransitedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_0,
+                                            name="Transited Pulse |0>")
+            signal_state_1 = TransitedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_1,
+                                            name="Transited Pulse |1>")
         elif self.readout_type == "reflection":
-            signal_state_0 = ReflectedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_0)
-            signal_state_1 = ReflectedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_1)
+            signal_state_0 = ReflectedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_0,
+                                            name="Reflected Pulse |0>")
+            signal_state_1 = ReflectedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_1,
+                                            name="Reflected Pulse |1>")
         else:
             raise NotImplementedError
 
@@ -74,9 +80,9 @@ class FidelitySimulation:
 
         plt.scatter(I_state_0, Q_state_0, label="|0>")
         plt.scatter(I_state_1, Q_state_1, label="|1>")
-        plt.xlabel('I')
-        plt.ylabel('Q')
-        plt.title('IQ Projection for State 0 and State 1')
+        plt.xlabel("I")
+        plt.ylabel("Q")
+        plt.title("IQ Projection for State 0 and State 1")
         plt.grid(True)
         plt.legend()
         plt.show()
@@ -90,11 +96,11 @@ class FidelitySimulation:
         total_noise = np.zeros(signal_length)
 
         for noise_name, params in self.noise_parameters.items():
-            noise_type = params['type']
-            R = params.get('resistance', 50.0)  # Use individual resistance if defined, else 50
+            noise_type = params["type"]
+            R = params.get("resistance", 50.0)  # Use individual resistance if defined, else 50
 
-            if noise_type == 'quantum':
-                T_ns = params.get('T_ns')
+            if noise_type == "quantum":
+                T_ns = params.get("T_ns")
 
                 # Bandwidth for quantum noise is 1/tp (from paper)
                 # pulse_duration is in seconds but needed in ns
@@ -103,22 +109,30 @@ class FidelitySimulation:
                 P_N_quantum = k * T_ns * B_quantum
                 sigma = np.sqrt(P_N_quantum * R)
 
-            elif noise_type == 'thermal':
-                T_eff = params.get('T_eff')
-                bandwidth = params.get('bandwidth')
+            elif noise_type == "thermal":
+                T_eff = params.get("T_eff")
+                bandwidth = params.get("bandwidth")
 
                 sigma = np.sqrt(4 * k * T_eff * bandwidth * R)
 
             else:
                 raise ValueError(f"Unknown noise type: {noise_type}")
 
-            total_noise += np.random.normal(0, sigma, size=signal_length)
+            # The white noise power spectral density has a unit of dBm.
+            total_noise += UnitConverter.dbm_to_amplitude(np.random.normal(0, sigma, size=signal_length))
 
         return total_noise
 
     def _IQ_projection_homodyne_demodulation(self, signal_from_system: Pulse):
         pulse_start = int(np.argmax(self.readout_pulse.t_signal > 0))
         pulse_end = np.argmax(self.readout_pulse.t_signal[pulse_start:] == 0) + pulse_start
+
+        signal_from_system.plot_pulse(
+            fill_t_area=(
+                self.readout_pulse.t_signal_times[pulse_start],
+                self.readout_pulse.t_signal_times[pulse_end],
+            )
+        )
 
         dt = signal_from_system.t_signal_times[1] - signal_from_system.t_signal_times[0]
         T = (pulse_end - pulse_start) * dt
