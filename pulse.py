@@ -1,8 +1,8 @@
 from abc import ABC
-
 import numpy as np
 import skrf as rf
 from matplotlib import pyplot as plt
+from scipy.signal import czt, CZT
 from scipy.interpolate import interp1d
 
 from utils import UnitConverter
@@ -15,7 +15,8 @@ class Pulse:
                  t_signal: np.ndarray = None,
                  t_signal_times: np.ndarray = None,
                  f_signal: np.ndarray = None,
-                 f_signal_frequencies: np.ndarray = None
+                 f_signal_frequencies: np.ndarray = None,
+                 frequencies_edges: tuple = None
                  ):
         if not (t_signal is None and t_signal_times is None and f_signal is None and f_signal_frequencies is None):
             if t_signal is None or t_signal_times is None or f_signal is None or f_signal_frequencies is None:
@@ -33,11 +34,11 @@ class Pulse:
 
         else:
             self.pulse_samples_number = pulse_samples_number
-            self.f_signal_frequencies = None
-            self.f_signal = None
-            self.t_signal = None
-            self.t_signal_times = None
+            self.t_signal = self.t_signal_times = None
+            self.f_signal = self.f_signal_frequencies = None
+
         self.name = name
+        self.frequencies_edges = frequencies_edges
 
     def create_pulse(self):
         # This method is intended to be overridden by child classes that generate
@@ -46,21 +47,66 @@ class Pulse:
         pass
 
     @staticmethod
-    def to_frequency_domain(time_signal: np.ndarray, dt: float, pulse_samples_number: int):
-        yf = np.fft.fft(time_signal)
-        xf = np.fft.fftfreq(pulse_samples_number, dt)
+    def to_frequency_domain(time_signal: np.ndarray,
+                            dt: float,
+                            pulse_samples_number: int,
+                            frequencies_edges: tuple
+                            ) -> (np.ndarray, np.ndarray):
+        """
+        Zoom into frequencies_edges with M = pulse_samples_number points via CZT
+        """
 
-        f_signal_shifted = np.fft.fftshift(yf)
-        f_signal_frequencies_shifted = np.fft.fftshift(xf)
-        return f_signal_shifted, f_signal_frequencies_shifted
+        M, W, A = Pulse._MWA(dt=dt,
+                             pulse_samples_number=pulse_samples_number,
+                             frequencies_edges=frequencies_edges,
+                             )
+
+        # forward CZT
+        f_signal = czt(time_signal, m=M, w=W, a=A)
+        f_signal_frequencies = np.linspace(frequencies_edges[0], frequencies_edges[1], M, endpoint=False)
+
+        return f_signal, f_signal_frequencies
 
     @staticmethod
-    def to_time_domain(frequency_signal: np.ndarray) -> np.ndarray:
-        # Inverse shift the frequency domain signal
-        ifft_shifted_data = np.fft.ifftshift(frequency_signal)
-        # Perform inverse FFT
-        t_signal = np.fft.ifft(ifft_shifted_data)
+    def to_time_domain(frequency_signal: np.ndarray,
+                       dt: float,
+                       pulse_samples_number: int,
+                       frequencies_edges: tuple
+                       ) -> np.ndarray:
+        """
+        Inverse CZT over the same zoom window;
+        """
+
+        M, W, A = Pulse._MWA(dt=dt,
+                             pulse_samples_number=pulse_samples_number,
+                             frequencies_edges=frequencies_edges,
+                             )
+
+        # build inverse-CZT by swapping W → 1/W, A → 1/A
+        iczt = CZT(M, m=M, w=1 / W, a=1 / A)
+        t_signal = iczt(frequency_signal) / M
+
         return t_signal
+
+    @staticmethod
+    def _MWA(dt: float,
+             pulse_samples_number: int,
+             frequencies_edges: tuple
+             ):
+        """
+          Helper function for to_frequency_domain and to_time_domain functions
+        """
+        fs = 1.0 / dt
+
+        f1 = frequencies_edges[0]
+        f2 = frequencies_edges[1]
+        M = pulse_samples_number
+
+        # same W, A as forward, but inverted
+        W = np.exp(-2j * np.pi * (f2 - f1) / (fs * M))
+        A = np.exp(2j * np.pi * f1 / fs)
+
+        return M, W, A
 
     @staticmethod
     def get_s_parameter(pulse_freqs: np.ndarray, ntw: rf.Network, param_index: tuple):
@@ -113,8 +159,8 @@ class Pulse:
 
 
 class ReadoutPulse(Pulse, ABC):
-    def __init__(self, pulse_duration: float, pulse_samples_number: int, name: str):
-        super().__init__(pulse_samples_number=pulse_samples_number, name=name)
+    def __init__(self, pulse_duration: float, pulse_samples_number: int, name: str, frequencies_edges: tuple):
+        super().__init__(pulse_samples_number=pulse_samples_number, name=name, frequencies_edges=frequencies_edges)
         self.pulse_duration = pulse_duration
 
 
@@ -127,12 +173,18 @@ class RectangularReadoutPulse(ReadoutPulse):
                  pulse_samples_number: int = 2 ** 23,
                  name: str = "Rectangular Readout Pulse",
                  ):
-        super().__init__(pulse_duration=pulse_duration, pulse_samples_number=pulse_samples_number, name=name)
         self.carrier_frequency = carrier_frequency
+        self.frequencies_edges = (self.carrier_frequency - 1 * 10 ** 9, self.carrier_frequency + 1 * 10 ** 9)
         self.pulse_duration = pulse_duration
         self.pulse_amplitude = UnitConverter.dbm_to_amplitude(pulse_power_dbm)
         self.total_signal_time = total_signal_time
         self.pulse_start_time = (self.total_signal_time - self.pulse_duration) / 2  # Store for plotting
+
+        super().__init__(pulse_duration=pulse_duration,
+                         pulse_samples_number=pulse_samples_number,
+                         name=name,
+                         frequencies_edges=self.frequencies_edges
+                         )
 
         self.create_pulse()
 
@@ -149,12 +201,15 @@ class RectangularReadoutPulse(ReadoutPulse):
         self.t_signal = t_signal_base * np.exp(1j * self.carrier_frequency * 2 * np.pi * t_signal_times)
         self.t_signal_times = t_signal_times
 
-        self.f_signal, self.f_signal_frequencies = self.to_frequency_domain(self.t_signal, dt,
-                                                                            self.pulse_samples_number)
+        self.f_signal, self.f_signal_frequencies = self.to_frequency_domain(time_signal=self.t_signal,
+                                                                            dt=dt,
+                                                                            pulse_samples_number=self.pulse_samples_number,
+                                                                            frequencies_edges=self.frequencies_edges
+                                                                            )
 
     def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None, fill_t_area: tuple = None, ):
         plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
-        plot_t_edges = (self.pulse_start_time * 0.9, self.pulse_start_time * 1.1 + self.pulse_duration)
+        # plot_t_edges = (self.pulse_start_time * 0.9, self.pulse_start_time * 1.1 + self.pulse_duration)
         super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges, fill_t_area=fill_t_area)
 
 
@@ -163,7 +218,14 @@ class ReflectedPulse(Pulse):
         s11_at_pulse_freq = self.get_s_parameter(original_pulse.f_signal_frequencies, ntw, param_index=(0, 0))
 
         reflected_f_signal = original_pulse.f_signal * s11_at_pulse_freq
-        reflected_t_signal = self.to_time_domain(reflected_f_signal)
+
+        dt = original_pulse.t_signal_times[1] - original_pulse.t_signal_times[0]
+
+        reflected_t_signal = self.to_time_domain(frequency_signal=reflected_f_signal,
+                                                 dt=dt,
+                                                 pulse_samples_number=original_pulse.pulse_samples_number,
+                                                 frequencies_edges=original_pulse.frequencies_edges
+                                                 )
 
         super().__init__(
             t_signal=reflected_t_signal,
@@ -171,7 +233,8 @@ class ReflectedPulse(Pulse):
             f_signal=reflected_f_signal,
             f_signal_frequencies=original_pulse.f_signal_frequencies,
             pulse_samples_number=original_pulse.pulse_samples_number,
-            name=name
+            name=name,
+            frequencies_edges=original_pulse.frequencies_edges
         )
 
     def create_pulse(self):
@@ -184,7 +247,12 @@ class TransitedPulse(Pulse):
         s21_at_pulse_freq = self.get_s_parameter(original_pulse.f_signal_frequencies, ntw, param_index=(1, 0))
 
         transmitted_f_signal = original_pulse.f_signal * s21_at_pulse_freq
-        transmitted_t_signal = self.to_time_domain(transmitted_f_signal)
+        dt = original_pulse.t_signal_times[1] - original_pulse.t_signal_times[0]
+        transmitted_t_signal = self.to_time_domain(frequency_signal=transmitted_f_signal,
+                                                   dt=dt,
+                                                   pulse_samples_number=original_pulse.pulse_samples_number,
+                                                   frequencies_edges=original_pulse.frequencies_edges
+                                                   )
 
         super().__init__(
             t_signal=transmitted_t_signal,
@@ -192,7 +260,8 @@ class TransitedPulse(Pulse):
             f_signal=transmitted_f_signal,
             f_signal_frequencies=original_pulse.f_signal_frequencies,
             pulse_samples_number=original_pulse.pulse_samples_number,
-            name=name
+            name=name,
+            frequencies_edges=original_pulse.frequencies_edges
         )
 
     def create_pulse(self):

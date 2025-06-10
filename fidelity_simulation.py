@@ -1,11 +1,15 @@
 import numpy as np
 import skrf as rf
-from joblib import Parallel, delayed, cpu_count
+from joblib import Parallel, delayed
 from matplotlib import pyplot as plt
+from matplotlib.colors import ListedColormap
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
-
 from pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
 from utils import UnitConverter
+from sklearn.linear_model import LogisticRegression
 
 """
 Fidelity simulation based on the paper
@@ -58,7 +62,7 @@ class FidelitySimulation:
             }
         self.noise_parameters = noise_parameters
 
-    def run(self):
+    def run(self) -> float:
         ntw_state_0 = rf.Network(self.s_parameters_file_state_0)
         ntw_state_1 = rf.Network(self.s_parameters_file_state_1)
 
@@ -78,14 +82,9 @@ class FidelitySimulation:
         I_state_0, Q_state_0 = self._IQ_projection_homodyne_demodulation(signal_from_system=signal_state_0)
         I_state_1, Q_state_1 = self._IQ_projection_homodyne_demodulation(signal_from_system=signal_state_1)
 
-        plt.scatter(I_state_0, Q_state_0, label="|0>")
-        plt.scatter(I_state_1, Q_state_1, label="|1>")
-        plt.xlabel("I")
-        plt.ylabel("Q")
-        plt.title("IQ Projection for State 0 and State 1")
-        plt.grid(True)
-        plt.legend()
-        plt.show()
+        fidelity = self._calculate_fidelity(I_state_0, Q_state_0, I_state_1, Q_state_1, plot_results=True)
+
+        return fidelity
 
     # Noise independent of signal power
     def _create_noise(self, signal_from_system: Pulse) -> np.ndarray:
@@ -124,13 +123,14 @@ class FidelitySimulation:
         return total_noise
 
     def _IQ_projection_homodyne_demodulation(self, signal_from_system: Pulse):
-        pulse_start = int(np.argmax(self.readout_pulse.t_signal > 0))
-        pulse_end = np.argmax(self.readout_pulse.t_signal[pulse_start:] == 0) + pulse_start
+        pulse_start = 0  # int(np.argmax(self.readout_pulse.t_signal > 0))
+        pulse_end = len(
+            self.readout_pulse.t_signal) - 1  # np.argmax(self.readout_pulse.t_signal[pulse_start:] == 0) + pulse_start
 
         signal_from_system.plot_pulse(
             fill_t_area=(
-                self.readout_pulse.t_signal_times[pulse_start],
-                self.readout_pulse.t_signal_times[pulse_end],
+                signal_from_system.t_signal_times[pulse_start],
+                signal_from_system.t_signal_times[pulse_end],
             )
         )
 
@@ -142,6 +142,7 @@ class FidelitySimulation:
             noise = self._create_noise(signal_from_system=signal_from_system)
 
             s = signal_from_system.t_signal.real + noise
+
             s_I = s / 2
             s_Q = s / 2
 
@@ -167,3 +168,85 @@ class FidelitySimulation:
         Q = [res[1] for res in results]
 
         return I, Q
+
+    @staticmethod
+    def _plot_decision_regions(model, scaler, X_data, Y_data, title_suffix=""):
+        plt.figure(figsize=(9, 7))
+
+        # Define plot limits based on the provided X_data
+        x_min, x_max = X_data[:, 0].min(), X_data[:, 0].max()
+        y_min, y_max = X_data[:, 1].min(), X_data[:, 1].max()
+
+        hshift = 0.5 * (x_max - x_min)
+        x_min, x_max = x_min - hshift, x_max + hshift
+        vshift = 0.5 * (y_max - y_min)
+        y_min, y_max = y_min - vshift, y_max + vshift
+
+        # Create a mesh (grid) of points for the decision boundary
+        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100),
+                             np.linspace(y_min, y_max, 100),
+                             )
+
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+
+        # Predict the class for each point on the grid using the provided model
+        grid_predictions = model.predict(scaler.transform(grid_points)).reshape(xx.shape)
+
+        # Plot the colored decision regions
+        plt.imshow(grid_predictions,
+                   aspect='auto',
+                   alpha=0.3,
+                   extent=(x_min, x_max, y_min, y_max),
+                   origin='lower',
+                   cmap=ListedColormap(['C0', 'C1'])
+                   )
+
+        # Plot the actual data points, colored by their state (Y_data)
+        plt.scatter(X_data[Y_data == 0, 0], X_data[Y_data == 0, 1], label="|0>", c='C0', alpha=0.8)
+        plt.scatter(X_data[Y_data == 1, 0], X_data[Y_data == 1, 1], label="|1>", c='C1', alpha=0.8)
+
+        plt.xlabel("I")
+        plt.ylabel("Q")
+        plt.title(f"IQ Projection with Logistic Regression Decision Regions {title_suffix}")
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+    def _calculate_fidelity(self, I_state_0, Q_state_0, I_state_1, Q_state_1, plot_results: bool = True) -> float:
+
+        # Combine I and Q lists
+        X_state_0 = np.column_stack((I_state_0, Q_state_0))
+        X_state_1 = np.column_stack((I_state_1, Q_state_1))
+
+        # Create labels (Y) for each state
+        Y_state_0 = np.zeros(len(I_state_0), dtype=int)
+        Y_state_1 = np.ones(len(I_state_1), dtype=int)
+
+        # Store combined features (X) and true labels (Y) as instance attributes
+        X = np.vstack((X_state_0, X_state_1))
+        Y = np.hstack((Y_state_0, Y_state_1))
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)  # Scale the full dataset
+
+        # Split the data into 80% training and 20% testing sets
+        X_train, X_test, Y_train, Y_test = train_test_split(X_scaled,
+                                                            Y,
+                                                            test_size=0.2,
+                                                            random_state=42
+                                                            )
+
+        # Initialize and train a Logistic Regression model on the training data
+        model_for_evaluation = LogisticRegression(random_state=42)
+        model_for_evaluation.fit(X_train, Y_train)
+
+        Y_pred = model_for_evaluation.predict(X_test)
+
+        # Calculate the accuracy
+        accuracy = accuracy_score(Y_test, Y_pred)
+
+        # Plot the results if requested, using the model trained on X_train
+        if plot_results:
+            self._plot_decision_regions(model_for_evaluation, scaler, X, Y, "(Trained on 80% data)")
+
+        return accuracy
