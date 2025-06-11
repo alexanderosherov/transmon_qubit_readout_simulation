@@ -159,9 +159,11 @@ class Pulse:
 
 
 class ReadoutPulse(Pulse, ABC):
-    def __init__(self, pulse_duration: float, pulse_samples_number: int, name: str, frequencies_edges: tuple):
+    def __init__(self, pulse_duration: float, pulse_samples_number: int, name: str, frequencies_edges: tuple,
+                 carrier_frequency: float):
         super().__init__(pulse_samples_number=pulse_samples_number, name=name, frequencies_edges=frequencies_edges)
         self.pulse_duration = pulse_duration
+        self.carrier_frequency = carrier_frequency
 
 
 class RectangularReadoutPulse(ReadoutPulse):
@@ -183,7 +185,8 @@ class RectangularReadoutPulse(ReadoutPulse):
         super().__init__(pulse_duration=pulse_duration,
                          pulse_samples_number=pulse_samples_number,
                          name=name,
-                         frequencies_edges=self.frequencies_edges
+                         frequencies_edges=self.frequencies_edges,
+                         carrier_frequency=carrier_frequency,
                          )
 
         self.create_pulse()

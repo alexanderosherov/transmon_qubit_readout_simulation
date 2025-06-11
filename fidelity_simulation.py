@@ -3,13 +3,14 @@ import skrf as rf
 from joblib import Parallel, delayed
 from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
+from scipy.signal import butter, filtfilt
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 from tqdm import tqdm
 from pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
 from utils import UnitConverter
-from sklearn.linear_model import LogisticRegression
 
 """
 Fidelity simulation based on the paper
@@ -27,11 +28,13 @@ class FidelitySimulation:
             s_parameters_file_state_0: str,
             s_parameters_file_state_1: str,
             IQ_projection_frequency: int,
+            # readout_type can be "transition" or "reflection"
             readout_type: str = "transition",
             num_iterations: int = 50,
             noise_parameters: dict = None,
+            # only needed if IQ_projection_frequency not the same as carrier_frequency of the readout pulse
+            readout_dt: float = None,
     ):
-        # readout_type can be "transition" or "reflection"
 
         self.s_parameters_file_state_0 = s_parameters_file_state_0
         self.s_parameters_file_state_1 = s_parameters_file_state_1
@@ -39,6 +42,7 @@ class FidelitySimulation:
         self.readout_type = readout_type
         self.IQ_projection_frequency = IQ_projection_frequency
         self.num_iterations = num_iterations
+        self.readout_dt = readout_dt
 
         # Noise parameters based on the paper
         if noise_parameters is None:
@@ -79,8 +83,8 @@ class FidelitySimulation:
         else:
             raise NotImplementedError
 
-        I_state_0, Q_state_0 = self._IQ_projection_homodyne_demodulation(signal_from_system=signal_state_0)
-        I_state_1, Q_state_1 = self._IQ_projection_homodyne_demodulation(signal_from_system=signal_state_1)
+        I_state_0, Q_state_0 = self._IQ_projection_demodulation(signal_from_system=signal_state_0)
+        I_state_1, Q_state_1 = self._IQ_projection_demodulation(signal_from_system=signal_state_1)
 
         fidelity = self._calculate_fidelity(I_state_0, Q_state_0, I_state_1, Q_state_1, plot_results=True)
 
@@ -122,20 +126,21 @@ class FidelitySimulation:
 
         return total_noise
 
-    def _IQ_projection_homodyne_demodulation(self, signal_from_system: Pulse):
-        pulse_start = 0  # int(np.argmax(self.readout_pulse.t_signal > 0))
-        pulse_end = len(
-            self.readout_pulse.t_signal) - 1  # np.argmax(self.readout_pulse.t_signal[pulse_start:] == 0) + pulse_start
-
-        signal_from_system.plot_pulse(
-            fill_t_area=(
-                signal_from_system.t_signal_times[pulse_start],
-                signal_from_system.t_signal_times[pulse_end],
-            )
-        )
+    def _IQ_projection_demodulation(self, signal_from_system: Pulse):
+        signal_from_system.plot_pulse()
 
         dt = signal_from_system.t_signal_times[1] - signal_from_system.t_signal_times[0]
-        T = (pulse_end - pulse_start) * dt
+        T = signal_from_system.t_signal_times[-1]
+
+        sampling_factor = 1
+
+        is_heterodyne_demodulation = self.readout_pulse.carrier_frequency != self.IQ_projection_frequency
+        if is_heterodyne_demodulation:
+            f_if = np.abs(self.readout_pulse.carrier_frequency - self.IQ_projection_frequency)
+
+            lowpass_filter_b, lowpass_filter_a = butter(2, f_if * 10, btype="lowpass", fs=1 / dt)
+
+            sampling_factor = int(self.readout_dt / dt)
 
         # Helper function to be parallelized
         def _process_single_projection():
@@ -143,21 +148,23 @@ class FidelitySimulation:
 
             s = signal_from_system.t_signal.real + noise
 
-            s_I = s / 2
-            s_Q = s / 2
-
             A_lo = 1
             y_I = A_lo / 2 * np.cos(self.IQ_projection_frequency * signal_from_system.t_signal_times)
             y_Q = -A_lo / 2 * np.sin(self.IQ_projection_frequency * signal_from_system.t_signal_times)
 
-            I_pre_integration = s_I * y_I * dt
-            Q_pre_integration = s_Q * y_Q * dt
+            if is_heterodyne_demodulation:
+                y_I = filtfilt(lowpass_filter_b, lowpass_filter_a, y_I)
+                y_Q = filtfilt(lowpass_filter_b, lowpass_filter_a, y_Q)
 
-            I_val = 1 / T * np.sum(I_pre_integration[pulse_start:pulse_end])
-            Q_val = 1 / T * np.sum(Q_pre_integration[pulse_start:pulse_end])
+            I_pre_integration = s / 2 * y_I * dt
+            Q_pre_integration = s / 2 * y_Q * dt
+
+            I_val = 1 / T * np.sum(I_pre_integration[::sampling_factor])
+            Q_val = 1 / T * np.sum(Q_pre_integration[::sampling_factor])
+
             return I_val, Q_val
 
-        # Parallelize the loop using joblib
+        # Parallelize the loop
         results = Parallel(n_jobs=-1)(
             delayed(_process_single_projection)()
             for _ in tqdm(range(self.num_iterations))
@@ -237,7 +244,7 @@ class FidelitySimulation:
                                                             )
 
         # Initialize and train a Logistic Regression model on the training data
-        model_for_evaluation = LogisticRegression(random_state=42)
+        model_for_evaluation = SVC(random_state=42)
         model_for_evaluation.fit(X_train, Y_train)
 
         Y_pred = model_for_evaluation.predict(X_test)
