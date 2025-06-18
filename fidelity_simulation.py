@@ -4,10 +4,10 @@ from joblib import Parallel, delayed
 from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 from scipy.signal import butter, filtfilt
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
 from tqdm import tqdm
 from pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
 from utils import UnitConverter
@@ -34,6 +34,9 @@ class FidelitySimulation:
             noise_parameters: dict = None,
             # only needed if IQ_projection_frequency not the same as carrier_frequency of the readout pulse
             readout_dt: float = None,
+            plot_pulses: bool = False,
+            plot_result: bool = False,
+            disable_progress_bar: bool = False,
     ):
 
         self.s_parameters_file_state_0 = s_parameters_file_state_0
@@ -43,6 +46,9 @@ class FidelitySimulation:
         self.IQ_projection_frequency = IQ_projection_frequency
         self.num_iterations = num_iterations
         self.readout_dt = readout_dt
+        self.plot_pulses = plot_pulses
+        self.plot_result = plot_result
+        self.disable_progress_bar = disable_progress_bar
 
         # Noise parameters based on the paper
         if noise_parameters is None:
@@ -86,7 +92,7 @@ class FidelitySimulation:
         I_state_0, Q_state_0 = self._IQ_projection_demodulation(signal_from_system=signal_state_0)
         I_state_1, Q_state_1 = self._IQ_projection_demodulation(signal_from_system=signal_state_1)
 
-        fidelity = self._calculate_fidelity(I_state_0, Q_state_0, I_state_1, Q_state_1, plot_results=True)
+        fidelity = self._calculate_fidelity(I_state_0, Q_state_0, I_state_1, Q_state_1)
 
         return fidelity
 
@@ -127,7 +133,8 @@ class FidelitySimulation:
         return total_noise
 
     def _IQ_projection_demodulation(self, signal_from_system: Pulse):
-        signal_from_system.plot_pulse()
+        if self.plot_pulses:
+            signal_from_system.plot_pulse()
 
         dt = signal_from_system.t_signal_times[1] - signal_from_system.t_signal_times[0]
         T = signal_from_system.t_signal_times[-1]
@@ -138,6 +145,7 @@ class FidelitySimulation:
         if is_heterodyne_demodulation:
             f_if = np.abs(self.readout_pulse.carrier_frequency - self.IQ_projection_frequency)
 
+            # noinspection PyTupleAssignmentBalance
             lowpass_filter_b, lowpass_filter_a = butter(2, f_if * 10, btype="lowpass", fs=1 / dt)
 
             sampling_factor = int(self.readout_dt / dt)
@@ -167,7 +175,8 @@ class FidelitySimulation:
         # Parallelize the loop
         results = Parallel(n_jobs=-1)(
             delayed(_process_single_projection)()
-            for _ in tqdm(range(self.num_iterations))
+            for _ in
+            tqdm(range(self.num_iterations), postfix=signal_from_system.name, disable=self.disable_progress_bar)
         )
 
         # Unpack the results
@@ -219,7 +228,7 @@ class FidelitySimulation:
         plt.legend()
         plt.show()
 
-    def _calculate_fidelity(self, I_state_0, Q_state_0, I_state_1, Q_state_1, plot_results: bool = True) -> float:
+    def _calculate_fidelity(self, I_state_0, Q_state_0, I_state_1, Q_state_1) -> float:
 
         # Combine I and Q lists
         X_state_0 = np.column_stack((I_state_0, Q_state_0))
@@ -244,7 +253,7 @@ class FidelitySimulation:
                                                             )
 
         # Initialize and train a Logistic Regression model on the training data
-        model_for_evaluation = SVC(random_state=42)
+        model_for_evaluation = LinearDiscriminantAnalysis()
         model_for_evaluation.fit(X_train, Y_train)
 
         Y_pred = model_for_evaluation.predict(X_test)
@@ -253,7 +262,7 @@ class FidelitySimulation:
         accuracy = accuracy_score(Y_test, Y_pred)
 
         # Plot the results if requested, using the model trained on X_train
-        if plot_results:
+        if self.plot_result:
             self._plot_decision_regions(model_for_evaluation, scaler, X, Y, "(Trained on 80% data)")
 
         return accuracy
