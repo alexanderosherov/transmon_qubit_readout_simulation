@@ -146,7 +146,7 @@ class FidelitySimulation:
             f_if = np.abs(self.readout_pulse.carrier_frequency - self.IQ_projection_frequency)
 
             # noinspection PyTupleAssignmentBalance
-            lowpass_filter_b, lowpass_filter_a = butter(2, f_if * 10, btype="lowpass", fs=1 / dt)
+            lowpass_filter_b, lowpass_filter_a = butter(1, f_if*2, btype="lowpass", fs=1 / dt)
 
             sampling_factor = int(self.readout_dt / dt)
 
@@ -160,15 +160,15 @@ class FidelitySimulation:
             y_I = A_lo / 2 * np.cos(self.IQ_projection_frequency * signal_from_system.t_signal_times)
             y_Q = -A_lo / 2 * np.sin(self.IQ_projection_frequency * signal_from_system.t_signal_times)
 
+            I_pre_integration = s / 2 * y_I
+            Q_pre_integration = s / 2 * y_Q
+
             if is_heterodyne_demodulation:
-                y_I = filtfilt(lowpass_filter_b, lowpass_filter_a, y_I)
-                y_Q = filtfilt(lowpass_filter_b, lowpass_filter_a, y_Q)
+                I_pre_integration = filtfilt(lowpass_filter_b, lowpass_filter_a, I_pre_integration)
+                Q_pre_integration = filtfilt(lowpass_filter_b, lowpass_filter_a, Q_pre_integration)
 
-            I_pre_integration = s / 2 * y_I * dt
-            Q_pre_integration = s / 2 * y_Q * dt
-
-            I_val = 1 / T * np.sum(I_pre_integration[::sampling_factor])
-            Q_val = 1 / T * np.sum(Q_pre_integration[::sampling_factor])
+            I_val = 1 / T * np.sum(I_pre_integration[::sampling_factor] * dt)
+            Q_val = 1 / T * np.sum(Q_pre_integration[::sampling_factor] * dt)
 
             return I_val, Q_val
 

@@ -114,3 +114,4 @@ websocket-client==1.8.0
 yarg==0.1.9
 
 scikit-learn~=1.7.0
+xarray~=2025.6.1
