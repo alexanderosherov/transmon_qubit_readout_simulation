@@ -16,10 +16,6 @@ frequencies_shifts = np.array([200, 200]) * 1e-6  # GHz
 
 version_name = "_".join([f"({x}±{round(y / 2, 9)})_GHz" for x, y in zip(resonators_original_frequencies, frequencies_shifts)]) + "-v0"
 
-description_text = (f"wmiklayout generated resonators for simulation of 2 qubits states, "
-                    f"'qubits_frequencies'={resonators_original_frequencies} GHz, "
-                    f"'frequencies_shifts'={frequencies_shifts}  GHz")
-
 assert number_of_qubits == len(resonators_original_frequencies) == len(
     frequencies_shifts), "qubits_frequencies or qubits_frequencies has wrong sizes"
 
@@ -59,26 +55,19 @@ def create_configuration(folder_name: str, configuration_name: str, resonator_fr
 
     # add chip to cell
     chip = lay.create_cell(
-        "FabricationChip",
+        "Chip",
         "WMIChips",
-        {"chip_width": chip_x, "chip_height": chip_y, "sigma": 0},
+        {"chip_type": 1, "offset": 200}, # type 1 = "2c6x10"
     )
     trans = pya.DCplxTrans(1, 0, False, -chip_x / 2, -chip_y / 2)
     top.insert(pya.DCellInstArray(chip.cell_index(), trans))
-
-    # add default launchers to cell
-    launcher = lay.create_cell("Launcher", "WMICPW", {})
-    trans = pya.DCplxTrans(1, 180, False, 0, -tl_length / 2)
-    top.insert(pya.DCellInstArray(launcher.cell_index(), trans))
-    trans = pya.DCplxTrans(1, 0, False, 0, tl_length / 2)
-    top.insert(pya.DCellInstArray(launcher.cell_index(), trans))
 
     # add transmission line to cell
     transmission_line = lay.create_cell(
         "Cpw",
         "WMICPW",
         {
-            "airbridge": True,  # always place air bridges in the transmission line
+            "airbridge": False,
             "airbridge_spacing": 200,
             "path": pya.DPath([pya.DPoint(0, -tl_length / 2), pya.DPoint(0, tl_length / 2)], 0),
         },
@@ -126,17 +115,8 @@ def create_configuration(folder_name: str, configuration_name: str, resonator_fr
         )
         mirror = not mirror
 
-    # place air bridge markers on the chip
-    marker = lay.create_cell(
-        "MarkerGrid",
-        "WMIMisc",
-        {"width": chip_x - 1000, "height": chip_y - 1000, "style": 1},
-    )
-    trans = pya.DCplxTrans(1, 0, False, 0, 0)
-    top.insert(pya.DCellInstArray(marker.cell_index(), trans))
-
     # place descriptive text on the chip
-    text = lay.create_cell("Text", "WMIMisc", {"text": description_text + ', states=' + configuration_name})
+    text = lay.create_cell("Text", "WMIMisc", {"text": 'states=' + configuration_name})
     trans = pya.DCplxTrans(
         1,
         90,
@@ -145,10 +125,6 @@ def create_configuration(folder_name: str, configuration_name: str, resonator_fr
         -text.bbox(lay.layer(default_layers.base_metal_gap.layer_info())).width() * lay.dbu / 2,
     )
     top.insert(pya.DCellInstArray(text.cell_index(), trans))
-
-    logo = lay.create_cell("WMILogo", "WMIMisc", {"scale": 2})
-    trans = pya.DCplxTrans(1, 90, False, -(chip_x / 2 - 350), -(chip_y / 2 - 350))
-    top.insert(pya.DCellInstArray(logo.cell_index(), trans))
 
     # run export functions
     # export_layout(lay, configuration_name, path, format="json")
