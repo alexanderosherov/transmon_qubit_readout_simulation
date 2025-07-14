@@ -3,7 +3,6 @@ from qutip import Qobj, FloquetBasis
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from typing import List, Tuple, Union, Dict
-from joblib import Parallel, delayed
 
 
 class TransmonFloquetSimulator:
@@ -18,6 +17,7 @@ class TransmonFloquetSimulator:
                  drive_frequency_wd: float,
                  g_strength: float,
                  n_r: np.ndarray,
+                 ng: float,
                  ):
         """
         Initializes the simulator with transmon and drive parameters.
@@ -29,7 +29,7 @@ class TransmonFloquetSimulator:
             drive_frequency_wd: Angular frequency of the drive (e.g., in GHz).
             g_strength: Coupling strength 'g'.
             n_r: Array of mean photon numbers to simulate.
-
+            ng: Charge offset
         """
         self.Ec = Ec
         self.EjEc = EjEc
@@ -44,11 +44,9 @@ class TransmonFloquetSimulator:
         self.floquet_branches = None
         self.averaged_excitation = None
 
-        self.H_t_bare = None
-        self.bare_eigenenergies, self.bare_eigenstates = None, None
-
+        self.H_t_bare = self._hamiltonian_t_shifted(ng)
+        self.bare_eigenenergies, self.bare_eigenstates = self.H_t_bare.eigenstates()
     def find_n_r_critical(self, branch_index: int,
-                          ng: float,
                           plot: bool = True,
                           branches_to_plot: Tuple[int] = None,
                           plot_range: Tuple[int, int] = None,
@@ -56,17 +54,12 @@ class TransmonFloquetSimulator:
         """
         Args:
             branch_index:
-            ng:
             plot:
             branches_to_plot:
             plot_range:
         Returns:
             n_r_critical: Critical number of photons in the resonator
-
         """
-        self.H_t_bare = self._hamiltonian_t_shifted(ng)
-        self.bare_eigenenergies, self.bare_eigenstates = self.H_t_bare.eigenstates()
-
         self._calculate_floquet_branches(show_progress=plot)
         self._calculate_averaged_transmon_excitation(show_progress=plot)
 
@@ -78,38 +71,6 @@ class TransmonFloquetSimulator:
         ac_index = self._find_first_avoided_crossing(branch_index)
 
         return ac_index
-
-    def find_minmax_n_r_critical(self, branch_index: int, ng: np.ndarray, plot: bool = True):
-        """
-        Args:
-            branch_index: Index of the Branch we use to define critical number n_r_critical
-            ng: Offset charge for the transmon.
-            plot: If true dependence between n_r_critical from ng will be plotted.
-
-        Returns:
-            n_r_critical: Minimal and maximal critical number of photons in the resonator
-        """
-        n_critical = []
-        for ng_val in tqdm(ng, desc="Finding min and max of n_r_critical"):
-            n_critical_for_this_ng = self.find_n_r_critical(branch_index, ng_val, plot=False)
-            n_critical.append(n_critical_for_this_ng)
-
-        # n_critical = Parallel(n_jobs=-1)(
-        #     delayed(self.find_n_r_critical)(branch_index, ng_val, plot=False)
-        #     for ng_val in tqdm(ng, desc="Finding min and max of n_r_critical")
-        # )
-
-        # Filter out None values in case _find_first_avoided_crossing can return None
-        n_critical = [val for val in n_critical if val is not None]
-        print("Critical number of photons in the resonator: {}".format(n_critical))
-
-        if not n_critical:
-            return None, None  # Or raise an error, depending on desired behavior
-
-        if plot:
-            self._plot_n_critical_dependence_from_ng(n_critical, ng)
-
-        return min(n_critical), max(n_critical)
 
     def _hamiltonian_t_shifted(self, ng_val: float) -> Qobj:
         """
@@ -354,26 +315,6 @@ class TransmonFloquetSimulator:
 
         plt.show()
 
-    @staticmethod
-    def _plot_n_critical_dependence_from_ng(n_critical: Union[np.ndarray, List], ng: np.ndarray) -> None:
-        """
-        Plots the dependece of critical photon number in ther esonator from ng
-
-        Args:
-            n_critical: List critical photon numbers to plot.
-            ng: List of used ng values
-        """
-
-        fig, axs = plt.subplots(1, 1, figsize=(7, 5.5), sharex=True, dpi=300)
-
-        axs.set_xlabel(r'$n_\text{g}$', fontsize=12)
-        axs.set_ylabel(r'$\bar{n}_\text{c}$', fontsize=12)
-        axs.grid(True, linestyle='--', alpha=0.5, zorder=0)
-        print()
-        axs.plot(ng, n_critical)
-
-        plt.show()
-
 
 # --- Example Usage ---
 if __name__ == "__main__":
@@ -388,8 +329,7 @@ if __name__ == "__main__":
     g_strength_sim = 0.48881501701797614  # Coupling strength in GHz
 
     # Initialize the simulator
-    simulator = TransmonFloquetSimulator(Ec_val, EjEc_val, N_val, w_d_val, g_strength_sim, n_r_list_sim)
+    simulator = TransmonFloquetSimulator(Ec_val, EjEc_val, N_val, w_d_val, g_strength_sim, n_r_list_sim, ng=0)
 
-    # result = simulator.find_n_r_critical(branch_index=1, ng=0)
-    result = simulator.find_minmax_n_r_critical(branch_index=1, ng=np.linspace(0, 0.5, 50))
+    result = simulator.find_n_r_critical(branch_index=1)
     print("result:", result)
