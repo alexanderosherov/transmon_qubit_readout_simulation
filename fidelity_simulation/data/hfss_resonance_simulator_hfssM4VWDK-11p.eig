@@ -1,8 +1,0 @@
-# Ansys eigenmode data file.  Version 2.0
-# Design:     hfssM4VWDK
-# Solution:   Eigenmode1 : AdaptivePass
-# Variation:  ""
-# --------------------------------------------------------------
-#   Mode                        Frequency (GHz)                Q
-# --------------------------------------------------------------
-       1                          7.26944640188             0
