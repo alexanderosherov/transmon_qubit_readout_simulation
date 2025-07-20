@@ -176,7 +176,7 @@ class RectangularReadoutPulse(ReadoutPulse):
                  name: str = "Rectangular Readout Pulse",
                  ):
         self.carrier_frequency = carrier_frequency
-        self.frequencies_edges = (self.carrier_frequency - 1 * 10 ** 9, self.carrier_frequency + 1 * 10 ** 9)
+        self.frequencies_edges = (self.carrier_frequency - 0.5 * 10 ** 9, self.carrier_frequency + 0.5 * 10 ** 9)
         self.pulse_duration = pulse_duration
         self.pulse_amplitude = UnitConverter.dbm_to_amplitude(pulse_power_dbm)
         self.total_signal_time = total_signal_time
@@ -211,7 +211,7 @@ class RectangularReadoutPulse(ReadoutPulse):
                                                                             )
 
     def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None, fill_t_area: tuple = None, ):
-        plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
+        # plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
         # plot_t_edges = (self.pulse_start_time * 0.9, self.pulse_start_time * 1.1 + self.pulse_duration)
         super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges, fill_t_area=fill_t_area)
 

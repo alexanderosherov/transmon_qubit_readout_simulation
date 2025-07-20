@@ -44,8 +44,11 @@ class TransmonFloquetSimulator:
         self.floquet_branches = None
         self.averaged_excitation = None
 
+        self.n_r_scale = (max(n_r) - min(n_r)) / len(n_r)
+
         self.H_t_bare = self._hamiltonian_t_shifted(ng)
         self.bare_eigenenergies, self.bare_eigenstates = self.H_t_bare.eigenstates()
+
     def find_n_r_critical(self, branch_index: int,
                           plot: bool = True,
                           branches_to_plot: Tuple[int] = None,
@@ -104,7 +107,7 @@ class TransmonFloquetSimulator:
         ]
         args: Dict[str, float] = {"w_d": self.w_d}
 
-        return FloquetBasis(H_list, self.T, args, sort=True, options=dict(nsteps=10000))
+        return FloquetBasis(H_list, self.T, args, sort=True, options=dict(nsteps=100000))
 
     def _calculate_floquet_branches(self, show_progress: bool = False) -> np.ndarray:
         """
@@ -195,7 +198,7 @@ class TransmonFloquetSimulator:
     def _calculate_transmon_excitation(self, floquet_basis, sorted_i):
         # Number of time steps for averaging within one period.
         # This can be adjusted for accuracy vs. speed.
-        num_time_points = 2 * self.N_charge_basis + 1  # Original was 2*N+1, which might be too few. 500 used previously.
+        num_time_points = 2 * self.N_charge_basis + 1
 
         t_list = np.linspace(0, self.T, num_time_points)
 
@@ -238,11 +241,19 @@ class TransmonFloquetSimulator:
             print(f"Error: Floquet branches not calculated or branch_index {branch_index} out of bounds.")
             return np.nan
 
-        branch = self.floquet_branches[:, branch_index]
+        branch = self.floquet_branches[:, branch_index] / self.w_d
         deriv = np.diff(branch, axis=0)
         crossings = np.where(np.diff(np.sign(deriv)))[0]
-        if len(crossings) > 0:
-            return int(crossings[0] + 1)
+
+        crossings_filtered = []
+        # because quasienergies are defined by modulo w_d, we can sometimes see the jumps with difference close to w_d
+        # which cause the false positive detection of the crossings
+        for crossing in crossings:
+            if abs(deriv[crossing]) < 0.999:
+                crossings_filtered.append(crossing)
+
+        if len(crossings_filtered) > 0:
+            return int(crossings_filtered[0] * self.n_r_scale + 1)
         else:
             return np.nan
 
