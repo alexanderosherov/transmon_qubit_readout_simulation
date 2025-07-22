@@ -146,7 +146,7 @@ class FidelitySimulation:
             f_if = np.abs(self.readout_pulse.carrier_frequency - self.IQ_projection_frequency)
 
             # noinspection PyTupleAssignmentBalance
-            lowpass_filter_b, lowpass_filter_a = butter(1, f_if*2, btype="lowpass", fs=1 / dt)
+            lowpass_filter_b, lowpass_filter_a = butter(1, f_if * 2, btype="lowpass", fs=1 / dt)
 
             sampling_factor = int(self.readout_dt / dt)
 
@@ -256,10 +256,10 @@ class FidelitySimulation:
         model_for_evaluation = LinearDiscriminantAnalysis()
         model_for_evaluation.fit(X_train, Y_train)
 
-        Y_pred = model_for_evaluation.predict(X_test)
+        Y_pred = model_for_evaluation.predict(X_scaled)
 
         # Calculate the accuracy
-        accuracy = accuracy_score(Y_test, Y_pred)
+        accuracy = accuracy_score(Y, Y_pred)
 
         # Plot the results if requested, using the model trained on X_train
         if self.plot_result:

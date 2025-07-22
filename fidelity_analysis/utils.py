@@ -71,11 +71,11 @@ class S2pUtils:
         except Exception as e:
             print(e)
 
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.tight_layout()
         plt.show()
 
 if "__main__" == __name__:
-    FILE = "data_00000_0.s2p"
+    FILE = "data_00000_0_ghz.s2p"
 
     current_path = os.path.abspath("")
     data_dir_path = os.path.join(current_path, "data")

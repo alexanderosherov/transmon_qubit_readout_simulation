@@ -2,10 +2,13 @@ from abc import ABC
 import numpy as np
 import skrf as rf
 from matplotlib import pyplot as plt
-from scipy.signal import czt, CZT
+from scipy.optimize import curve_fit
+from scipy.signal import czt, CZT, find_peaks
 from scipy.interpolate import interp1d
 
 from utils import UnitConverter
+
+USE_FFT = False
 
 
 class Pulse:
@@ -52,18 +55,25 @@ class Pulse:
                             pulse_samples_number: int,
                             frequencies_edges: tuple
                             ) -> (np.ndarray, np.ndarray):
-        """
-        Zoom into frequencies_edges with M = pulse_samples_number points via CZT
-        """
 
-        M, W, A = Pulse._MWA(dt=dt,
-                             pulse_samples_number=pulse_samples_number,
-                             frequencies_edges=frequencies_edges,
-                             )
+        if USE_FFT:
+            yf = np.fft.fft(time_signal)
+            xf = np.fft.fftfreq(pulse_samples_number, dt)
+            f_signal = np.fft.fftshift(yf)
+            f_signal_frequencies = np.fft.fftshift(xf)
 
-        # forward CZT
-        f_signal = czt(time_signal, m=M, w=W, a=A)
-        f_signal_frequencies = np.linspace(frequencies_edges[0], frequencies_edges[1], M, endpoint=False)
+        else:
+            """
+              Zoom into frequencies_edges with M = pulse_samples_number points via CZT
+            """
+
+            M, W, A = Pulse._MWA(dt=dt,
+                                 pulse_samples_number=pulse_samples_number,
+                                 frequencies_edges=frequencies_edges,
+                                 )
+
+            f_signal = czt(time_signal, m=M, w=W, a=A)
+            f_signal_frequencies = np.linspace(frequencies_edges[0], frequencies_edges[1], M, endpoint=False)
 
         return f_signal, f_signal_frequencies
 
@@ -73,18 +83,24 @@ class Pulse:
                        pulse_samples_number: int,
                        frequencies_edges: tuple
                        ) -> np.ndarray:
-        """
-        Inverse CZT over the same zoom window;
-        """
+        if USE_FFT:
+            # Inverse shift the frequency domain signal
+            ifft_shifted_data = np.fft.ifftshift(frequency_signal)
+            # Perform inverse FFT
+            t_signal = np.fft.ifft(ifft_shifted_data)
+        else:
+            """
+            Inverse CZT over the same zoom window;
+            """
 
-        M, W, A = Pulse._MWA(dt=dt,
-                             pulse_samples_number=pulse_samples_number,
-                             frequencies_edges=frequencies_edges,
-                             )
+            M, W, A = Pulse._MWA(dt=dt,
+                                 pulse_samples_number=pulse_samples_number,
+                                 frequencies_edges=frequencies_edges,
+                                 )
 
-        # build inverse-CZT by swapping W → 1/W, A → 1/A
-        iczt = CZT(M, m=M, w=1 / W, a=1 / A)
-        t_signal = iczt(frequency_signal) / M
+            # build inverse-CZT by swapping W → 1/W, A → 1/A
+            iczt = CZT(M, m=M, w=1 / W, a=1 / A)
+            t_signal = iczt(frequency_signal) / M
 
         return t_signal
 
@@ -107,6 +123,47 @@ class Pulse:
         A = np.exp(2j * np.pi * f1 / fs)
 
         return M, W, A
+
+    # TODO: decide if we need fitting or interpolation is good enough
+    # @staticmethod
+    # def complex_lorentzian(f, f0, gamma, A_real, A_imag, offset_real, offset_imag):
+    #     return (A_real + 1j * A_imag) / (1 + 2j * (f - f0) / gamma) + (offset_real + 1j * offset_imag)
+    #
+    # def fit_complex_lorentzian(self, frequencies, s_param_data):
+    #     f0_guess = frequencies[np.argmax(np.abs(s_param_data))]
+    #     gamma_guess = (np.max(frequencies) - np.min(frequencies)) * 0.1
+    #     p0 = [f0_guess, gamma_guess, np.std(np.real(s_param_data)) * 2, np.std(np.imag(s_param_data)) * 2,
+    #           np.mean(np.real(s_param_data)), np.mean(np.imag(s_param_data))]
+    #
+    #     def fit_func(f, f0, gamma, A_real, A_imag, offset_real, offset_imag):
+    #         result = self.complex_lorentzian(f, f0, gamma, A_real, A_imag, offset_real, offset_imag)
+    #         return np.concatenate([np.real(result), np.imag(result)])
+    #
+    #     try:
+    #         popt, _ = curve_fit(fit_func, frequencies, np.concatenate([np.real(s_param_data), np.imag(s_param_data)]),
+    #                             p0=p0)
+    #         return lambda f: self.complex_lorentzian(f, *popt), popt
+    #     except:
+    #         return lambda f: np.full_like(f, np.mean(s_param_data), dtype=complex), None
+    #
+    # def get_s_parameter_fit(self, pulse_freqs: np.ndarray, ntw: rf.Network, param_index: tuple):
+    #     s_param_original = ntw.s[:, param_index[0], param_index[1]]
+    #     frequencies_original = ntw.f
+    #     fitted_func, popt = self.fit_complex_lorentzian(frequencies_original, s_param_original)
+    #
+    #     # plt.plot(frequencies_original, np.real(s_param_original), label="S21 real")
+    #     # plt.plot(frequencies_original, np.imag(s_param_original), label="S21 imag")
+    #     # plt.plot(pulse_freqs, np.real(fitted_func(pulse_freqs)), label="fitted real", lw=5, zorder=-10)
+    #     # plt.plot(pulse_freqs, np.imag(fitted_func(pulse_freqs)), label="fitted imag", lw=5, zorder=-10)
+    #     # plt.xlim(frequencies_original[0], frequencies_original[-1])
+    #     # plt.legend()
+    #     # plt.show()
+    #     # plt.plot(frequencies_original, np.abs(s_param_original), label="S21 abs")
+    #     # plt.plot(pulse_freqs, np.abs(fitted_func(pulse_freqs)), label="fitted abs", lw=5, zorder=-10)
+    #     # plt.xlim(frequencies_original[0], frequencies_original[-1])
+    #     # plt.legend()
+    #     # plt.show()
+    #     return fitted_func(pulse_freqs)
 
     @staticmethod
     def get_s_parameter(pulse_freqs: np.ndarray, ntw: rf.Network, param_index: tuple):
@@ -176,7 +233,7 @@ class RectangularReadoutPulse(ReadoutPulse):
                  name: str = "Rectangular Readout Pulse",
                  ):
         self.carrier_frequency = carrier_frequency
-        self.frequencies_edges = (self.carrier_frequency - 0.5 * 10 ** 9, self.carrier_frequency + 0.5 * 10 ** 9)
+        self.frequencies_edges = (self.carrier_frequency - 5 * 10 ** 9, self.carrier_frequency + 5 * 10 ** 9)
         self.pulse_duration = pulse_duration
         self.pulse_amplitude = UnitConverter.dbm_to_amplitude(pulse_power_dbm)
         self.total_signal_time = total_signal_time
