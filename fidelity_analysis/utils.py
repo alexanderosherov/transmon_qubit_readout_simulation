@@ -4,9 +4,15 @@ import skrf as rf
 import matplotlib.pyplot as plt
 import numpy as np
 
+
 class UnitConverter:
+    H_BAR = 1.054571817e-34
+
     @staticmethod
-    def dbm_to_amplitude(power_dbm: float, impedance_ohms: float = 50.0) -> float:
+    def dbm_to_watts(power_dbm: float) -> float:
+        return 10 ** (power_dbm / 10) * 1e-3
+
+    def dbm_to_amplitude(self, power_dbm: float, impedance_ohms: float = 50.0) -> float:
         """
         Converts power in dBm to peak voltage amplitude.
 
@@ -17,8 +23,7 @@ class UnitConverter:
         Returns:
             float: Peak voltage amplitude.
         """
-        # Convert power from dBm to Watts
-        power_watts = 10 ** ((power_dbm - 30) / 10)
+        power_watts = self.dbm_to_watts(power_dbm)
 
         # Calculate RMS voltage: P = V_rms^2 / R  => V_rms = sqrt(P * R)
         voltage_rms = np.sqrt(power_watts * impedance_ohms)
@@ -27,6 +32,22 @@ class UnitConverter:
         voltage_peak = voltage_rms * np.sqrt(2)
 
         return voltage_peak
+
+    def dbm_to_photons(self, power_dbm, frequency_hz, kappa_total_rad_s):
+        omega_r = 2 * np.pi * frequency_hz
+
+        power_watts = self.dbm_to_watts(power_dbm)
+        photons_number_in_resonator = power_watts / (self.H_BAR * omega_r * kappa_total_rad_s / 2)
+        return photons_number_in_resonator
+
+    def photons_to_dbm(self, photons_number_in_resonator, frequency_hz, kappa_total_rad_s):
+        omega_r = 2 * np.pi * frequency_hz
+
+        power_watts = photons_number_in_resonator * (self.H_BAR * omega_r * kappa_total_rad_s / 2)
+        power_dbm = np.log10(power_watts / 1e-3) * 10
+
+        return power_dbm
+
 
 class S2pUtils:
     @staticmethod
@@ -74,6 +95,7 @@ class S2pUtils:
         plt.tight_layout()
         plt.show()
 
+
 if "__main__" == __name__:
     FILE = "data_00000_0_ghz.s2p"
 
@@ -81,5 +103,3 @@ if "__main__" == __name__:
     data_dir_path = os.path.join(current_path, "data")
     file_path = os.path.join(data_dir_path, FILE)
     S2pUtils.plot_s2p(file_path)
-
-

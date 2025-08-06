@@ -9,8 +9,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
-from pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
-from utils import UnitConverter
+from fidelity_analysis.pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
+from fidelity_analysis.utils import UnitConverter
 
 """
 Fidelity simulation based on the paper
@@ -38,6 +38,7 @@ class FidelitySimulation:
             plot_result: bool = False,
             disable_progress_bar: bool = False,
     ):
+        assert IQ_projection_frequency != readout_pulse.carrier_frequency
 
         self.s_parameters_file_state_0 = s_parameters_file_state_0
         self.s_parameters_file_state_1 = s_parameters_file_state_1
@@ -78,14 +79,14 @@ class FidelitySimulation:
 
         if self.readout_type == "transition":
             signal_state_0 = TransitedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_0,
-                                            name="Transited Pulse |0>")
+                                            name=r"Transited Pulser $|0\rangle$")
             signal_state_1 = TransitedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_1,
-                                            name="Transited Pulse |1>")
+                                            name=r"Transited Pulse $|1\rangle$")
         elif self.readout_type == "reflection":
             signal_state_0 = ReflectedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_0,
-                                            name="Reflected Pulse |0>")
+                                            name=r"Reflected Pulse $|0\rangle$")
             signal_state_1 = ReflectedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_1,
-                                            name="Reflected Pulse |1>")
+                                            name=r"Reflected Pulse $|1\rangle$")
         else:
             raise NotImplementedError
 
@@ -128,7 +129,7 @@ class FidelitySimulation:
                 raise ValueError(f"Unknown noise type: {noise_type}")
 
             # The white noise power spectral density has a unit of dBm.
-            total_noise += UnitConverter.dbm_to_amplitude(np.random.normal(0, sigma, size=signal_length))
+            total_noise += UnitConverter().dbm_to_amplitude(np.random.normal(0, sigma, size=signal_length))
 
         return total_noise
 
@@ -141,14 +142,12 @@ class FidelitySimulation:
 
         sampling_factor = 1
 
-        is_heterodyne_demodulation = self.readout_pulse.carrier_frequency != self.IQ_projection_frequency
-        if is_heterodyne_demodulation:
-            f_if = np.abs(self.readout_pulse.carrier_frequency - self.IQ_projection_frequency)
+        f_if = np.abs(self.readout_pulse.carrier_frequency - self.IQ_projection_frequency)
 
-            # noinspection PyTupleAssignmentBalance
-            lowpass_filter_b, lowpass_filter_a = butter(1, f_if * 2, btype="lowpass", fs=1 / dt)
+        # noinspection PyTupleAssignmentBalance
+        lowpass_filter_b, lowpass_filter_a = butter(1, f_if * 2, btype="lowpass", fs=1 / dt)
 
-            sampling_factor = int(self.readout_dt / dt)
+        sampling_factor = int(self.readout_dt / dt)
 
         # Helper function to be parallelized
         def _process_single_projection():
@@ -157,15 +156,16 @@ class FidelitySimulation:
             s = signal_from_system.t_signal.real + noise
 
             A_lo = 1
-            y_I = A_lo / 2 * np.cos(self.IQ_projection_frequency * signal_from_system.t_signal_times)
-            y_Q = -A_lo / 2 * np.sin(self.IQ_projection_frequency * signal_from_system.t_signal_times)
+            y = A_lo * np.cos(self.IQ_projection_frequency * signal_from_system.t_signal_times)
+            y_I = np.cos(self.IQ_projection_frequency * signal_from_system.t_signal_times)
+            y_Q = np.sin(self.IQ_projection_frequency * signal_from_system.t_signal_times)
 
-            I_pre_integration = s / 2 * y_I
-            Q_pre_integration = s / 2 * y_Q
+            mixed_signal = s * y
 
-            if is_heterodyne_demodulation:
-                I_pre_integration = filtfilt(lowpass_filter_b, lowpass_filter_a, I_pre_integration)
-                Q_pre_integration = filtfilt(lowpass_filter_b, lowpass_filter_a, Q_pre_integration)
+            filter_signal = filtfilt(lowpass_filter_b, lowpass_filter_a, mixed_signal)
+
+            I_pre_integration = filter_signal * y_I
+            Q_pre_integration = filter_signal * y_Q
 
             I_val = 1 / T * np.sum(I_pre_integration[::sampling_factor] * dt)
             Q_val = 1 / T * np.sum(Q_pre_integration[::sampling_factor] * dt)
@@ -211,21 +211,25 @@ class FidelitySimulation:
         # Plot the colored decision regions
         plt.imshow(grid_predictions,
                    aspect='auto',
-                   alpha=0.3,
+                   alpha=0.2,
                    extent=(x_min, x_max, y_min, y_max),
                    origin='lower',
-                   cmap=ListedColormap(['C0', 'C1'])
+                   cmap=ListedColormap(['C0', 'C1']),
+                   zorder=0,
                    )
 
         # Plot the actual data points, colored by their state (Y_data)
-        plt.scatter(X_data[Y_data == 0, 0], X_data[Y_data == 0, 1], label="|0>", c='C0', alpha=0.8)
-        plt.scatter(X_data[Y_data == 1, 0], X_data[Y_data == 1, 1], label="|1>", c='C1', alpha=0.8)
+        plt.scatter(X_data[Y_data == 0, 0], X_data[Y_data == 0, 1],
+                    label=r"$|0\rangle$", c='C0', alpha=1, zorder=3)
+        plt.scatter(X_data[Y_data == 1, 0], X_data[Y_data == 1, 1],
+                    label=r"$|1\rangle$", c='C1', alpha=1, zorder=3)
 
-        plt.xlabel("I")
-        plt.ylabel("Q")
-        plt.title(f"IQ Projection with Logistic Regression Decision Regions {title_suffix}")
-        plt.grid(True)
+        plt.xlabel("$I$ (a.u.)")
+        plt.ylabel("$Q$ (a.u.)")
+        plt.title(f"IQ Projection Plot with Decision Regions {title_suffix}")
         plt.legend()
+        plt.tight_layout()
+        plt.savefig("fidelity_simulation.png")
         plt.show()
 
     def _calculate_fidelity(self, I_state_0, Q_state_0, I_state_1, Q_state_1) -> float:
@@ -263,6 +267,6 @@ class FidelitySimulation:
 
         # Plot the results if requested, using the model trained on X_train
         if self.plot_result:
-            self._plot_decision_regions(model_for_evaluation, scaler, X, Y, "(Trained on 80% data)")
+            self._plot_decision_regions(model_for_evaluation, scaler, X, Y)
 
         return accuracy

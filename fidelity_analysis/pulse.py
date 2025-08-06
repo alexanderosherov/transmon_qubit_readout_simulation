@@ -2,13 +2,16 @@ from abc import ABC
 import numpy as np
 import skrf as rf
 from matplotlib import pyplot as plt
-from scipy.optimize import curve_fit
-from scipy.signal import czt, CZT, find_peaks
+from scipy.signal import czt, CZT
 from scipy.interpolate import interp1d
 
-from utils import UnitConverter
+from fidelity_analysis.utils import UnitConverter
 
 USE_FFT = False
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+
+
 
 
 class Pulse:
@@ -98,10 +101,20 @@ class Pulse:
                                  frequencies_edges=frequencies_edges,
                                  )
 
-            # build inverse-CZT by swapping W → 1/W, A → 1/A
-            iczt = CZT(M, m=M, w=1 / W, a=1 / A)
-            t_signal = iczt(frequency_signal) / M
+            N_out = pulse_samples_number
+            W_inv = 1 / W
+            A_inv = 1 / A
 
+            # The number of points in the frequency signal is M
+            num_freq_points = len(frequency_signal)
+
+            y_conj = np.conj(frequency_signal)
+
+            # Use a flexible CZT that takes M points in and produces N points out
+            t_signal_conj_scaled = czt(y_conj, m=N_out, w=W_inv, a=A_inv)
+
+            N_time_points = pulse_samples_number
+            t_signal = np.conj(t_signal_conj_scaled) / N_time_points
         return t_signal
 
     @staticmethod
@@ -123,47 +136,6 @@ class Pulse:
         A = np.exp(2j * np.pi * f1 / fs)
 
         return M, W, A
-
-    # TODO: decide if we need fitting or interpolation is good enough
-    # @staticmethod
-    # def complex_lorentzian(f, f0, gamma, A_real, A_imag, offset_real, offset_imag):
-    #     return (A_real + 1j * A_imag) / (1 + 2j * (f - f0) / gamma) + (offset_real + 1j * offset_imag)
-    #
-    # def fit_complex_lorentzian(self, frequencies, s_param_data):
-    #     f0_guess = frequencies[np.argmax(np.abs(s_param_data))]
-    #     gamma_guess = (np.max(frequencies) - np.min(frequencies)) * 0.1
-    #     p0 = [f0_guess, gamma_guess, np.std(np.real(s_param_data)) * 2, np.std(np.imag(s_param_data)) * 2,
-    #           np.mean(np.real(s_param_data)), np.mean(np.imag(s_param_data))]
-    #
-    #     def fit_func(f, f0, gamma, A_real, A_imag, offset_real, offset_imag):
-    #         result = self.complex_lorentzian(f, f0, gamma, A_real, A_imag, offset_real, offset_imag)
-    #         return np.concatenate([np.real(result), np.imag(result)])
-    #
-    #     try:
-    #         popt, _ = curve_fit(fit_func, frequencies, np.concatenate([np.real(s_param_data), np.imag(s_param_data)]),
-    #                             p0=p0)
-    #         return lambda f: self.complex_lorentzian(f, *popt), popt
-    #     except:
-    #         return lambda f: np.full_like(f, np.mean(s_param_data), dtype=complex), None
-    #
-    # def get_s_parameter_fit(self, pulse_freqs: np.ndarray, ntw: rf.Network, param_index: tuple):
-    #     s_param_original = ntw.s[:, param_index[0], param_index[1]]
-    #     frequencies_original = ntw.f
-    #     fitted_func, popt = self.fit_complex_lorentzian(frequencies_original, s_param_original)
-    #
-    #     # plt.plot(frequencies_original, np.real(s_param_original), label="S21 real")
-    #     # plt.plot(frequencies_original, np.imag(s_param_original), label="S21 imag")
-    #     # plt.plot(pulse_freqs, np.real(fitted_func(pulse_freqs)), label="fitted real", lw=5, zorder=-10)
-    #     # plt.plot(pulse_freqs, np.imag(fitted_func(pulse_freqs)), label="fitted imag", lw=5, zorder=-10)
-    #     # plt.xlim(frequencies_original[0], frequencies_original[-1])
-    #     # plt.legend()
-    #     # plt.show()
-    #     # plt.plot(frequencies_original, np.abs(s_param_original), label="S21 abs")
-    #     # plt.plot(pulse_freqs, np.abs(fitted_func(pulse_freqs)), label="fitted abs", lw=5, zorder=-10)
-    #     # plt.xlim(frequencies_original[0], frequencies_original[-1])
-    #     # plt.legend()
-    #     # plt.show()
-    #     return fitted_func(pulse_freqs)
 
     @staticmethod
     def get_s_parameter(pulse_freqs: np.ndarray, ntw: rf.Network, param_index: tuple):
@@ -197,7 +169,6 @@ class Pulse:
         ax[0].set_title('Time Domain')
         ax[0].set_xlabel('Time (s)')
         ax[0].set_ylabel('Amplitude')
-        ax[0].set_xlim(plot_t_edges)
         ax[0].grid(True)
         ax[0].tick_params(axis='x', labelrotation=45)
         if fill_t_area is not None:
@@ -207,8 +178,36 @@ class Pulse:
         ax[1].set_title('Magnitude Spectrum')
         ax[1].set_xlabel('Frequency (Hz)')
         ax[1].set_ylabel('Magnitude')
-        ax[1].set_xlim(plot_f_edges)
         ax[1].grid(True)
+
+        def add_zoom_inset(outer_ax, x_data, y_data, xlim, location='upper right', zoom_size=(0.4, 0.4)):
+
+            inset_ax = inset_axes(outer_ax, width=f"{zoom_size[0] * 100}%", height=f"{zoom_size[1] * 100}%", loc=location, borderpad=1.3)
+            inset_ax.plot(x_data, y_data)
+            inset_ax.set_xlim(xlim)
+            inset_ax.grid(False)
+            inset_ax.tick_params(labelsize=8)
+            inset_ax.xaxis.offsetText.set_fontsize(8)
+            inset_ax.yaxis.offsetText.set_fontsize(8)
+
+            return inset_ax
+
+        if plot_f_edges is not None:
+            add_zoom_inset(
+                outer_ax=ax[1],
+                x_data=self.f_signal_frequencies,
+                y_data=np.real(self.f_signal),
+                xlim=plot_f_edges,
+                location='upper right'
+            )
+        if plot_t_edges is not None:
+            add_zoom_inset(
+                outer_ax=ax[0],
+                x_data=self.t_signal_times,
+                y_data=np.real(self.t_signal),
+                xlim=plot_t_edges,
+                location='upper right'
+            )
 
         plt.suptitle(self.name, fontsize=14)
         plt.tight_layout()
@@ -217,10 +216,11 @@ class Pulse:
 
 class ReadoutPulse(Pulse, ABC):
     def __init__(self, pulse_duration: float, pulse_samples_number: int, name: str, frequencies_edges: tuple,
-                 carrier_frequency: float):
+                 carrier_frequency: float, pulse_amplitude: float):
         super().__init__(pulse_samples_number=pulse_samples_number, name=name, frequencies_edges=frequencies_edges)
         self.pulse_duration = pulse_duration
         self.carrier_frequency = carrier_frequency
+        self.pulse_amplitude = pulse_amplitude
 
 
 class RectangularReadoutPulse(ReadoutPulse):
@@ -233,9 +233,9 @@ class RectangularReadoutPulse(ReadoutPulse):
                  name: str = "Rectangular Readout Pulse",
                  ):
         self.carrier_frequency = carrier_frequency
-        self.frequencies_edges = (self.carrier_frequency - 5 * 10 ** 9, self.carrier_frequency + 5 * 10 ** 9)
+        self.frequencies_edges = (self.carrier_frequency - 200 * 10 ** 6, self.carrier_frequency + 200 * 10 ** 6)
         self.pulse_duration = pulse_duration
-        self.pulse_amplitude = UnitConverter.dbm_to_amplitude(pulse_power_dbm)
+        self.pulse_amplitude = UnitConverter().dbm_to_amplitude(pulse_power_dbm)
         self.total_signal_time = total_signal_time
         self.pulse_start_time = (self.total_signal_time - self.pulse_duration) / 2  # Store for plotting
 
@@ -244,6 +244,7 @@ class RectangularReadoutPulse(ReadoutPulse):
                          name=name,
                          frequencies_edges=self.frequencies_edges,
                          carrier_frequency=carrier_frequency,
+                         pulse_amplitude=self.pulse_amplitude,
                          )
 
         self.create_pulse()
@@ -268,8 +269,8 @@ class RectangularReadoutPulse(ReadoutPulse):
                                                                             )
 
     def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None, fill_t_area: tuple = None, ):
-        # plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
-        # plot_t_edges = (self.pulse_start_time * 0.9, self.pulse_start_time * 1.1 + self.pulse_duration)
+        plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
+        plot_t_edges = (self.pulse_start_time, self.pulse_start_time + self.pulse_duration * 0.001)
         super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges, fill_t_area=fill_t_area)
 
 
