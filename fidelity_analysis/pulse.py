@@ -7,7 +7,7 @@ from scipy.interpolate import interp1d
 
 from fidelity_analysis.utils import UnitConverter
 
-USE_FFT = False
+USE_FFT = True
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
@@ -56,11 +56,14 @@ class Pulse:
     def to_frequency_domain(time_signal: np.ndarray,
                             dt: float,
                             pulse_samples_number: int,
-                            frequencies_edges: tuple
+                            frequencies_edges: tuple,
+                            force_use_czt: bool = False,
                             ) -> (np.ndarray, np.ndarray):
 
-        if USE_FFT:
-            yf = np.fft.fft(time_signal)
+        if USE_FFT and not force_use_czt:
+            # Scale by dt to approximate the continuous Fourier Transform ---
+            # This gives f_signal physically meaningful units (e.g., V*s or V/Hz)
+            yf = np.fft.fft(time_signal) * dt
             xf = np.fft.fftfreq(pulse_samples_number, dt)
             f_signal = np.fft.fftshift(yf)
             f_signal_frequencies = np.fft.fftshift(xf)
@@ -74,8 +77,8 @@ class Pulse:
                                  pulse_samples_number=pulse_samples_number,
                                  frequencies_edges=frequencies_edges,
                                  )
-
-            f_signal = czt(time_signal, m=M, w=W, a=A)
+            f_signal_unscaled = czt(time_signal, m=M, w=W, a=A)
+            f_signal = f_signal_unscaled * dt
             f_signal_frequencies = np.linspace(frequencies_edges[0], frequencies_edges[1], M, endpoint=False)
 
         return f_signal, f_signal_frequencies
@@ -89,11 +92,18 @@ class Pulse:
         if USE_FFT:
             # Inverse shift the frequency domain signal
             ifft_shifted_data = np.fft.ifftshift(frequency_signal)
-            # Perform inverse FFT
-            t_signal = np.fft.ifft(ifft_shifted_data)
+
+            # This is the inverse operation of scaling by dt in the forward transform.
+            # np.fft.ifft already scales by 1/N, so we need to multiply by fs to get
+            # the correct amplitude back. (1/N) * fs = (1/N) * (1/dt) = df.
+            # The total scaling is df * N = fs.
+            sampling_frequency = 1.0 / dt
+            t_signal = np.fft.ifft(ifft_shifted_data) * sampling_frequency
+
         else:
             """
             Inverse CZT over the same zoom window;
+            WARNING: this returns wrong results, not sure how to fix at the moment
             """
 
             M, W, A = Pulse._MWA(dt=dt,
@@ -101,20 +111,22 @@ class Pulse:
                                  frequencies_edges=frequencies_edges,
                                  )
 
+
+            sampling_frequency = 1.0 / dt
+            frequency_signal_rescaled = frequency_signal * sampling_frequency
+
             N_out = pulse_samples_number
             W_inv = 1 / W
             A_inv = 1 / A
 
-            # The number of points in the frequency signal is M
-            num_freq_points = len(frequency_signal)
+            y_conj = np.conj(frequency_signal_rescaled)
 
-            y_conj = np.conj(frequency_signal)
-
-            # Use a flexible CZT that takes M points in and produces N points out
             t_signal_conj_scaled = czt(y_conj, m=N_out, w=W_inv, a=A_inv)
 
-            N_time_points = pulse_samples_number
-            t_signal = np.conj(t_signal_conj_scaled) / N_time_points
+            # The standard inverse CZT formula requires this scaling
+            N_freq_points = len(frequency_signal)
+            t_signal = np.conj(t_signal_conj_scaled) / N_freq_points
+
         return t_signal
 
     @staticmethod
@@ -156,7 +168,7 @@ class Pulse:
 
         return s_param_processed
 
-    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None, fill_t_area: tuple = None, ):
+    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None):
         if self.t_signal is None or self.t_signal_times is None:
             print("Cannot plot time domain pulse: t_signal or t_signal_times is not populated.")
             return
@@ -164,31 +176,30 @@ class Pulse:
             print("Cannot plot frequency domain pulse: f_signal or f_signal_frequencies is not populated.")
             return
 
-        fig, ax = plt.subplots(2, 1, figsize=(8, 6))
+        fig, ax = plt.subplots(2, 1, figsize=(8, 7))
         ax[0].plot(self.t_signal_times, np.real(self.t_signal))
         ax[0].set_title('Time Domain')
         ax[0].set_xlabel('Time (s)')
         ax[0].set_ylabel('Amplitude')
-        ax[0].grid(True)
         ax[0].tick_params(axis='x', labelrotation=45)
-        if fill_t_area is not None:
-            ax[0].axvspan(fill_t_area[0], fill_t_area[1], alpha=0.5, color='red')
 
         ax[1].plot(self.f_signal_frequencies, np.abs(self.f_signal))
         ax[1].set_title('Magnitude Spectrum')
         ax[1].set_xlabel('Frequency (Hz)')
         ax[1].set_ylabel('Magnitude')
-        ax[1].grid(True)
+        ax[1].tick_params(axis='x', labelrotation=45)
 
         def add_zoom_inset(outer_ax, x_data, y_data, xlim, location='upper right', zoom_size=(0.4, 0.4)):
 
             inset_ax = inset_axes(outer_ax, width=f"{zoom_size[0] * 100}%", height=f"{zoom_size[1] * 100}%", loc=location, borderpad=1.3)
             inset_ax.plot(x_data, y_data)
+            inset_ax.scatter(x_data, y_data, s=1, color="black", zorder=100)
             inset_ax.set_xlim(xlim)
             inset_ax.grid(False)
             inset_ax.tick_params(labelsize=8)
             inset_ax.xaxis.offsetText.set_fontsize(8)
             inset_ax.yaxis.offsetText.set_fontsize(8)
+            inset_ax.tick_params(axis='x', labelrotation=45)
 
             return inset_ax
 
@@ -196,7 +207,7 @@ class Pulse:
             add_zoom_inset(
                 outer_ax=ax[1],
                 x_data=self.f_signal_frequencies,
-                y_data=np.real(self.f_signal),
+                y_data=np.abs(self.f_signal),
                 xlim=plot_f_edges,
                 location='upper right'
             )
@@ -268,10 +279,10 @@ class RectangularReadoutPulse(ReadoutPulse):
                                                                             frequencies_edges=self.frequencies_edges
                                                                             )
 
-    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None, fill_t_area: tuple = None, ):
+    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None):
         plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
         plot_t_edges = (self.pulse_start_time, self.pulse_start_time + self.pulse_duration * 0.001)
-        super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges, fill_t_area=fill_t_area)
+        super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges)
 
 
 class ReflectedPulse(Pulse):

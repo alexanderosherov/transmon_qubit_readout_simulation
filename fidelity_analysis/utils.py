@@ -3,6 +3,7 @@ import os
 import skrf as rf
 import matplotlib.pyplot as plt
 import numpy as np
+from cycler import cycler
 
 
 class UnitConverter:
@@ -94,6 +95,15 @@ class S2pUtils:
 
         plt.tight_layout()
         plt.show()
+
+def setup_plotting():
+    plt.rcParams['axes.grid'] = True
+    plt.rcParams['grid.linestyle'] = '--'
+    plt.rcParams['grid.alpha'] = 0.5
+    plt.rcParams['figure.dpi'] = 300
+    plt.rcParams['axes.labelsize'] = 14
+
+    plt.rcParams['axes.prop_cycle'] = cycler(color=['#669bbc', '#60d394', '#ee6055', ])
 
 
 if "__main__" == __name__:
