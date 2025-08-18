@@ -41,8 +41,8 @@ def dipSpreader(input_fp: str, output_fp: str, scale_factor: float):
 
 
 if __name__ == "__main__":
-    IN_FILE = "template_0ghz_resonator_cut_wide.s2p"
-    OUT_FILE = "template_0ghz_resonator_cut_wide_shift.s2p"
+    IN_FILE = "hfss_resonance_simulator_Resonator_7252612e-6GHz_2_ports_v12_cut.s2p"
+    OUT_FILE = "hfss_resonance_simulator_Resonator_7252612e-6GHz_2_ports_v12_cut_5000khz.s2p"
 
     current_path = os.path.abspath("")
     data_dir_path = os.path.join(current_path, "data")
@@ -55,6 +55,6 @@ if __name__ == "__main__":
     # hz2ghz(in_file_path, out_file_path)
     # cut_spektrum(in_file_path, out_file_path, freq_min_ghz=-0.01, freq_max_ghz=0.01)
     # dipSpreader(in_file_path, out_file_path, scale_factor=25)
-    shift_s2p_freq_axis_minimal(in_file_path, out_file_path, 6.065852884)
+    shift_s2p_freq_axis_minimal(in_file_path, out_file_path, 0.005)
 
     print("DONE")

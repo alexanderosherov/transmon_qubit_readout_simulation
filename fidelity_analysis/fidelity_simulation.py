@@ -244,7 +244,7 @@ class FidelitySimulation:
 
     @staticmethod
     def _plot_decision_regions(model, scaler, X_data, Y_data, title_suffix=""):
-        #plt.figure(figsize=(9, 7))
+        plt.figure(figsize=(6, 8))
 
         # Define plot limits based on the provided X_data
         x_min, x_max = X_data[:, 0].min(), X_data[:, 0].max()
@@ -277,17 +277,17 @@ class FidelitySimulation:
 
         # Plot the actual data points, colored by their state (Y_data)
         plt.scatter(X_data[Y_data == 0, 0], X_data[Y_data == 0, 1],
-                    label=r"$|0\rangle$", c='C0', alpha=0.6, zorder=-1)
+                    label=r"$|0\rangle$", c='C0', alpha=0.2, zorder=-1)
         plt.scatter(X_data[Y_data == 1, 0], X_data[Y_data == 1, 1],
-                    label=r"$|1\rangle$", c='C1', alpha=0.6, zorder=-1)
+                    label=r"$|1\rangle$", c='C1', alpha=0.2, zorder=-1)
 
         plt.xlabel("$I$ (a.u.)")
         plt.ylabel("$Q$ (a.u.)")
-        plt.title(f"IQ Projection Plot with Decision Regions {title_suffix}")
         plt.legend()
         plt.gca().set_aspect('equal', adjustable='box')
         plt.tight_layout()
-        plt.savefig("fidelity_simulation.png")
+        plt.savefig("fidelity_simulation.pdf", bbox_inches='tight')
+        plt.title(f"IQ Projection Plot with Decision Regions {title_suffix}")
         plt.show()
 
     def _calculate_fidelity(self, I_state_0, Q_state_0, I_state_1, Q_state_1) -> float:

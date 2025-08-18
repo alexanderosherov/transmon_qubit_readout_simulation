@@ -13,6 +13,10 @@ class UnitConverter:
     def dbm_to_watts(power_dbm: float) -> float:
         return 10 ** (power_dbm / 10) * 1e-3
 
+    @staticmethod
+    def watts_to_db(power_watts: float) -> float:
+        return np.log10(power_watts * 1e3) * 10
+
     def dbm_to_amplitude(self, power_dbm: float, impedance_ohms: float = 50.0) -> float:
         """
         Converts power in dBm to peak voltage amplitude.
@@ -96,14 +100,14 @@ class S2pUtils:
         plt.tight_layout()
         plt.show()
 
-def setup_plotting():
+def setup_plotting(dpi=300):
     plt.rcParams['axes.grid'] = True
     plt.rcParams['grid.linestyle'] = '--'
     plt.rcParams['grid.alpha'] = 0.5
-    plt.rcParams['figure.dpi'] = 300
+    plt.rcParams['figure.dpi'] = dpi
     plt.rcParams['axes.labelsize'] = 14
 
-    plt.rcParams['axes.prop_cycle'] = cycler(color=['#669bbc', '#60d394', '#ee6055', ])
+    plt.rcParams['axes.prop_cycle'] = cycler(color=['#669bbc',  '#ee6055', '#60d394'])
 
 
 if "__main__" == __name__:

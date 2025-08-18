@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 from qutip import Qobj, FloquetBasis
 from tqdm import tqdm
@@ -281,8 +283,8 @@ class TransmonFloquetSimulator:
         fig, axs = plt.subplots(2, 1, figsize=(7, 5.5), sharex=True, dpi=300,
                                 constrained_layout=True)
 
-        colors = plt.cm.tab10.colors
-        plot_colors = [colors[i % len(colors)] for i in range(len(branches_to_plot))]
+        #colors = plt.cm.tab10.colors
+        #plot_colors = [colors[i % len(colors)] for i in range(len(branches_to_plot))]
 
         # --- Top Plot (Floquet Quasienergies) ---
         for i in range(plot_range[0], min(plot_range[1], num_branches)):
@@ -292,7 +294,7 @@ class TransmonFloquetSimulator:
 
         for idx, i_t in enumerate(branches_to_plot):
             axs[0].plot(self.n_r, self.floquet_branches[:, i_t] / self.w_d,
-                        linewidth=2.5, label=f'$B_{i_t}$', color=plot_colors[idx], zorder=2)
+                        linewidth=2.5, label=f'$B_{i_t}$',  zorder=2)#color=plot_colors[idx],
 
         axs[0].legend(bbox_to_anchor=(0.5, 1.0), loc='lower center', ncol=len(branches_to_plot),
                       fontsize=15, frameon=False, columnspacing=1.5, handlelength=1.5)
@@ -301,8 +303,8 @@ class TransmonFloquetSimulator:
 
         # Axis styling for top plot
         axs[0].grid(True, linestyle='--', alpha=0.5, zorder=0)
-        axs[0].spines['top'].set_visible(False)
-        axs[0].spines['right'].set_visible(False)
+        #axs[0].spines['top'].set_visible(False)
+        #axs[0].spines['right'].set_visible(False)
         axs[0].tick_params(axis='both', which='major', labelsize=10, length=4, width=1)
 
         # --- Bottom Plot (Averaged Transmon Excitation) ---
@@ -313,17 +315,18 @@ class TransmonFloquetSimulator:
 
         for idx, i_t in enumerate(branches_to_plot):
             axs[1].plot(self.n_r, self.averaged_excitation[:, i_t],
-                        linewidth=2.5, label=f'{i_t}_t', color=plot_colors[idx], zorder=2)
+                        linewidth=2.5, label=f'{i_t}_t',  zorder=2)#color=plot_colors[idx],
 
         axs[1].set_xlabel(r'$\bar{n}$', fontsize=12)
         axs[1].set_ylabel('$N_t$', fontsize=12)
 
         # Axis styling for bottom plot
         axs[1].grid(True, linestyle='--', alpha=0.5, zorder=0)  # Add a subtle grid
-        axs[1].spines['top'].set_visible(False)
-        axs[1].spines['right'].set_visible(False)
+        #axs[1].spines['top'].set_visible(False)
+        #axs[1].spines['right'].set_visible(False)
         axs[1].tick_params(axis='both', which='major', labelsize=10, length=4, width=1)
 
+        plt.savefig(f'floquet_branches_{time.strftime("%Y%m%d-%H%M%S")}.pdf')
         plt.show()
 
 

@@ -11,9 +11,6 @@ USE_FFT = True
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
-
-
-
 class Pulse:
     def __init__(self,
                  pulse_samples_number: int,
@@ -111,7 +108,6 @@ class Pulse:
                                  frequencies_edges=frequencies_edges,
                                  )
 
-
             sampling_frequency = 1.0 / dt
             frequency_signal_rescaled = frequency_signal * sampling_frequency
 
@@ -176,22 +172,20 @@ class Pulse:
             print("Cannot plot frequency domain pulse: f_signal or f_signal_frequencies is not populated.")
             return
 
-        fig, ax = plt.subplots(2, 1, figsize=(8, 7))
+        fig, ax = plt.subplots(2, 1, figsize=(8, 8))
         ax[0].plot(self.t_signal_times, np.real(self.t_signal))
-        ax[0].set_title('Time Domain')
         ax[0].set_xlabel('Time (s)')
-        ax[0].set_ylabel('Amplitude')
-        ax[0].tick_params(axis='x', labelrotation=45)
+        ax[0].set_ylabel('Amplitude (V)')
 
         ax[1].plot(self.f_signal_frequencies, np.abs(self.f_signal))
-        ax[1].set_title('Magnitude Spectrum')
         ax[1].set_xlabel('Frequency (Hz)')
-        ax[1].set_ylabel('Magnitude')
-        ax[1].tick_params(axis='x', labelrotation=45)
+        ax[1].set_ylabel('Magnitude (V)')
 
-        def add_zoom_inset(outer_ax, x_data, y_data, xlim, location='upper right', zoom_size=(0.4, 0.4)):
 
-            inset_ax = inset_axes(outer_ax, width=f"{zoom_size[0] * 100}%", height=f"{zoom_size[1] * 100}%", loc=location, borderpad=1.3)
+        def add_zoom_inset(outer_ax, x_data, y_data, xlim, location, zoom_size=(0.4, 0.4)):
+
+            inset_ax = inset_axes(outer_ax, width=f"{zoom_size[0] * 100}%", height=f"{zoom_size[1] * 100}%",
+                                  loc=location, borderpad=1.5)
             inset_ax.plot(x_data, y_data)
             inset_ax.scatter(x_data, y_data, s=1, color="black", zorder=100)
             inset_ax.set_xlim(xlim)
@@ -209,7 +203,7 @@ class Pulse:
                 x_data=self.f_signal_frequencies,
                 y_data=np.abs(self.f_signal),
                 xlim=plot_f_edges,
-                location='upper right'
+                location='upper left'
             )
         if plot_t_edges is not None:
             add_zoom_inset(
@@ -217,11 +211,11 @@ class Pulse:
                 x_data=self.t_signal_times,
                 y_data=np.real(self.t_signal),
                 xlim=plot_t_edges,
-                location='upper right'
+                location='upper left'
             )
 
-        plt.suptitle(self.name, fontsize=14)
         plt.tight_layout()
+        plt.savefig("pulse.pdf", bbox_inches='tight')
         plt.show()
 
 
