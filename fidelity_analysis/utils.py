@@ -100,6 +100,23 @@ class S2pUtils:
         plt.tight_layout()
         plt.show()
 
+    @staticmethod
+    def create_resonator_S21(f_hz, Q_e, Q):
+        def full_model(f, fr, Ql, Qc):
+            term1 = Ql / Qc
+            term2 = 1 + 2j * Ql * (f - fr) / fr
+            return 1 - term1 / term2
+
+        f_arr = np.linspace(f_hz * 0.999, f_hz * 1.001, 10000)
+        S21 = full_model(f_arr, f_hz, Q, Q_e)
+        freqs_ntw = rf.Frequency.from_f(f_arr, unit='Hz')
+
+        s_params = np.zeros((len(f_arr), 2, 2), dtype=complex)
+        s_params[:, 1, 0] = S21
+
+        return rf.Network(frequency=freqs_ntw, s=s_params)
+
+
 def setup_plotting(dpi=300):
     plt.rcParams['axes.grid'] = True
     plt.rcParams['grid.linestyle'] = '--'
@@ -107,13 +124,14 @@ def setup_plotting(dpi=300):
     plt.rcParams['figure.dpi'] = dpi
     plt.rcParams['axes.labelsize'] = 14
 
-    plt.rcParams['axes.prop_cycle'] = cycler(color=['#669bbc',  '#ee6055', '#60d394'])
+    # plt.rcParams['axes.prop_cycle'] = cycler(color=['#669bbc', '#ee6055', '#60d394'])
+    # plt.rcParams['axes.prop_cycle'] = cycler(color=[ '#354757', '#93342D',  '#D88848', ])
+    plt.rcParams['axes.prop_cycle'] = cycler(color=['#2F4858', '#A02829', '#85BBD8', '#97A169', '#C8A0DC'])
 
-
-if "__main__" == __name__:
-    FILE = "data_00000_0_ghz.s2p"
-
-    current_path = os.path.abspath("")
-    data_dir_path = os.path.join(current_path, "data")
-    file_path = os.path.join(data_dir_path, FILE)
-    S2pUtils.plot_s2p(file_path)
+# if "__main__" == __name__:
+#     FILE = "data_00000_0_ghz.s2p"
+#
+#     current_path = os.path.abspath("")
+#     data_dir_path = os.path.join(current_path, "data")
+#     file_path = os.path.join(data_dir_path, FILE)
+#     S2pUtils.plot_s2p(file_path)

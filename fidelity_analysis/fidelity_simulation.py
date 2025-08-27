@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 import skrf as rf
 from joblib import Parallel, delayed
@@ -8,6 +10,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from skrf import Network
 from tqdm import tqdm
 from fidelity_analysis.pulse import Pulse, TransitedPulse, ReflectedPulse, ReadoutPulse
 
@@ -24,8 +27,8 @@ class FidelitySimulation:
     def __init__(
             self,
             readout_pulse: ReadoutPulse,
-            s_parameters_file_state_0: str,
-            s_parameters_file_state_1: str,
+            s_parameters_file_state_0: Union[str, Network],
+            s_parameters_file_state_1: Union[str, Network],
             IQ_projection_frequency: float,
             # readout_type can be "transition" or "reflection"
             readout_type: str = "transition",
@@ -88,8 +91,14 @@ class FidelitySimulation:
         self.noise_parameters = noise_parameters
 
     def run(self) -> float:
-        ntw_state_0 = rf.Network(self.s_parameters_file_state_0)
-        ntw_state_1 = rf.Network(self.s_parameters_file_state_1)
+        if type(self.s_parameters_file_state_0) is str:
+            ntw_state_0 = rf.Network(self.s_parameters_file_state_0)
+        else:
+            ntw_state_0 = self.s_parameters_file_state_0
+        if type(self.s_parameters_file_state_1) is str:
+            ntw_state_1 = rf.Network(self.s_parameters_file_state_1)
+        else:
+            ntw_state_1 = self.s_parameters_file_state_1
 
         if self.readout_type == "transition":
             signal_state_0 = TransitedPulse(original_pulse=self.readout_pulse, ntw=ntw_state_0,
@@ -287,6 +296,7 @@ class FidelitySimulation:
         plt.gca().set_aspect('equal', adjustable='box')
         plt.tight_layout()
         plt.savefig("fidelity_simulation.pdf", bbox_inches='tight')
+        plt.savefig("fidelity_simulation.png", bbox_inches='tight')
         plt.title(f"IQ Projection Plot with Decision Regions {title_suffix}")
         plt.show()
 

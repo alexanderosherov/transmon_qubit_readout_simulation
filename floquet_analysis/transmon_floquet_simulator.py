@@ -6,6 +6,8 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from typing import List, Tuple, Union, Dict
 
+from fidelity_analysis.utils import setup_plotting
+
 
 class TransmonFloquetSimulator:
     """
@@ -46,14 +48,12 @@ class TransmonFloquetSimulator:
         self.floquet_branches = None
         self.averaged_excitation = None
 
-        self.n_r_scale = (max(n_r) - min(n_r)) / len(n_r)
-
         self.H_t_bare = self._hamiltonian_t_shifted(ng)
         self.bare_eigenenergies, self.bare_eigenstates = self.H_t_bare.eigenstates()
 
     def find_n_r_critical(self, branch_index: int,
                           plot: bool = True,
-                          branches_to_plot: Tuple[int] = None,
+                          branches_to_plot: List[int] = None,
                           plot_range: Tuple[int, int] = None,
                           ) -> int:
         """
@@ -66,7 +66,8 @@ class TransmonFloquetSimulator:
             n_r_critical: Critical number of photons in the resonator
         """
         self._calculate_floquet_branches(show_progress=plot)
-        self._calculate_averaged_transmon_excitation(show_progress=plot)
+        if plot:
+            self._calculate_averaged_transmon_excitation(show_progress=plot)
 
         if plot:
             if branches_to_plot is None:
@@ -109,7 +110,7 @@ class TransmonFloquetSimulator:
         ]
         args: Dict[str, float] = {"w_d": self.w_d}
 
-        return FloquetBasis(H_list, self.T, args, sort=True, options=dict(nsteps=100000))
+        return FloquetBasis(H_list, self.T, args, sort=True, options=dict(nsteps=5000))
 
     def _calculate_floquet_branches(self, show_progress: bool = False) -> np.ndarray:
         """
@@ -255,12 +256,12 @@ class TransmonFloquetSimulator:
                 crossings_filtered.append(crossing)
 
         if len(crossings_filtered) > 0:
-            return int(crossings_filtered[0] * self.n_r_scale + 1)
+            return self.n_r[crossings_filtered[0]]
         else:
             return np.nan
 
     def _plot_floquet_results_for_the_latest_ng(self, plot_range: Tuple[int, int],
-                                                branches_to_plot: Tuple[int] = None) -> None:
+                                                branches_to_plot: List[int] = None) -> None:
         """
         Plots the Floquet quasienergies and averaged transmon excitation.
 
@@ -275,7 +276,7 @@ class TransmonFloquetSimulator:
         if branches_to_plot is None:
             branches_to_plot = []
 
-        num_branches = self.floquet_branches.shape[1]
+        num_branches = 15  # self.floquet_branches.shape[1]
 
         if plot_range is None:
             plot_range = [0, num_branches]
@@ -283,47 +284,49 @@ class TransmonFloquetSimulator:
         fig, axs = plt.subplots(2, 1, figsize=(7, 5.5), sharex=True, dpi=300,
                                 constrained_layout=True)
 
-        #colors = plt.cm.tab10.colors
-        #plot_colors = [colors[i % len(colors)] for i in range(len(branches_to_plot))]
-
-        # --- Top Plot (Floquet Quasienergies) ---
-        for i in range(plot_range[0], min(plot_range[1], num_branches)):
-            if i not in branches_to_plot:
-                axs[0].plot(self.n_r, self.floquet_branches[:, i] / self.w_d,
-                            linewidth=0.8, color='grey', alpha=0.6, zorder=1)
-
-        for idx, i_t in enumerate(branches_to_plot):
-            axs[0].plot(self.n_r, self.floquet_branches[:, i_t] / self.w_d,
-                        linewidth=2.5, label=f'$B_{i_t}$',  zorder=2)#color=plot_colors[idx],
-
-        axs[0].legend(bbox_to_anchor=(0.5, 1.0), loc='lower center', ncol=len(branches_to_plot),
-                      fontsize=15, frameon=False, columnspacing=1.5, handlelength=1.5)
-        axs[0].set_ylabel(r'$\epsilon_i / \omega_\text{d}$', fontsize=12)
-        axs[0].set_ylim(-0.5, 0.5)
-
-        # Axis styling for top plot
-        axs[0].grid(True, linestyle='--', alpha=0.5, zorder=0)
-        #axs[0].spines['top'].set_visible(False)
-        #axs[0].spines['right'].set_visible(False)
-        axs[0].tick_params(axis='both', which='major', labelsize=10, length=4, width=1)
+        # colors = plt.cm.tab10.colors
+        # plot_colors = [colors[i % len(colors)] for i in range(len(branches_to_plot))]
 
         # --- Bottom Plot (Averaged Transmon Excitation) ---
         for i in range(plot_range[0], min(plot_range[1], num_branches)):
             if i not in branches_to_plot:
-                axs[1].plot(self.n_r, self.averaged_excitation[:, i],
+                axs[0].plot(self.n_r, self.averaged_excitation[:, i],
                             linewidth=0.8, color='grey', alpha=0.6, zorder=1)
 
         for idx, i_t in enumerate(branches_to_plot):
-            axs[1].plot(self.n_r, self.averaged_excitation[:, i_t],
-                        linewidth=2.5, label=f'{i_t}_t',  zorder=2)#color=plot_colors[idx],
+            axs[0].plot(self.n_r, self.averaged_excitation[:, i_t],
+                        linewidth=2.5, label=fr'${i_t}_t$', zorder=2)  # color=plot_colors[idx],
 
-        axs[1].set_xlabel(r'$\bar{n}$', fontsize=12)
-        axs[1].set_ylabel('$N_t$', fontsize=12)
-
+        # axs[0].set_xlabel(r'$\bar{n}$', fontsize=12)
+        axs[0].set_ylabel('$N_t$', fontsize=12)
+        axs[0].legend(bbox_to_anchor=(0.5, 1.0), loc='lower center', ncol=len(branches_to_plot),
+                      fontsize=15, frameon=False, columnspacing=1.5, handlelength=1.5)
         # Axis styling for bottom plot
-        axs[1].grid(True, linestyle='--', alpha=0.5, zorder=0)  # Add a subtle grid
-        #axs[1].spines['top'].set_visible(False)
-        #axs[1].spines['right'].set_visible(False)
+        axs[0].grid(True, linestyle='--', alpha=0.5, zorder=0)  # Add a subtle grid
+        # axs[0].spines['top'].set_visible(False)
+        # axs[0].spines['right'].set_visible(False)
+        axs[0].tick_params(axis='both', which='major', labelsize=10, length=4, width=1)
+
+        # --- Top Plot (Floquet Quasienergies) ---
+        for i in range(plot_range[0], min(plot_range[1], num_branches)):
+            if i not in branches_to_plot:
+                axs[1].plot(self.n_r, self.floquet_branches[:, i] / self.w_d,
+                            linewidth=0.8, color='grey', alpha=0.6, zorder=1)
+
+        for idx, i_t in enumerate(branches_to_plot):
+            axs[1].plot(self.n_r, self.floquet_branches[:, i_t] / self.w_d,
+                        linewidth=2.5, label=f'$B_{i_t}$', zorder=2)  # color=plot_colors[idx],
+
+        # axs[1].legend(bbox_to_anchor=(0.5, 1.0), loc='lower center', ncol=len(branches_to_plot),
+        #               fontsize=15, frameon=False, columnspacing=1.5, handlelength=1.5)
+        axs[1].set_xlabel(r'$\bar{n}$', fontsize=12)
+        axs[1].set_ylabel(r'$\epsilon_i / \omega_\text{d}$', fontsize=12)
+        axs[1].set_ylim(-0.5, 0.5)
+
+        # Axis styling for top plot
+        axs[1].grid(True, linestyle='--', alpha=0.5, zorder=0)
+        # axs[1].spines['top'].set_visible(False)
+        # axs[1].spines['right'].set_visible(False)
         axs[1].tick_params(axis='both', which='major', labelsize=10, length=4, width=1)
 
         plt.savefig(f'floquet_branches_{time.strftime("%Y%m%d-%H%M%S")}.pdf')
@@ -332,18 +335,30 @@ class TransmonFloquetSimulator:
 
 # --- Example Usage ---
 if __name__ == "__main__":
-    # Define parameters for the Floquet simulation
-    Ec_val = 1.328549866299301  # GHz
-    EjEc_val = 46.40380378145438  # Ratio
-    N_val = 10  # Charge basis truncation
-    w_d_val = 38.109963742041856  # GHz (Drive frequency)
+    # # Define parameters for the Floquet simulation
+    # Ec_val = 1.328549866299301  # GHz
+    # EjEc_val = 46.40380378145438  # Ratio
+    # w_d_val = 38.109963742041856  # GHz (Drive frequency)
+    # g_strength_sim = 0.48881501701797614  # Coupling strength in GHz
 
-    # Define the range of resonator photon numbers
-    n_r_list_sim = np.linspace(0, 150, 151)
-    g_strength_sim = 0.48881501701797614  # Coupling strength in GHz
+    N_val = 15  # Charge basis truncation
 
+    EjEc_val = 110
+    Ec_val = 0.220  # GHz
+    g_strength_sim = 0.120  # GHz
+    wr_div_2pi = 7.5  # GHz
+    w_d_val = 7.515  # GHz
+    kappa_div_2pi = 0.00795  # GHz (7.95 MHz)
+
+    n_r_max = 180
+    et_step = kappa_div_2pi
+    et_max = 2 * g_strength_sim * np.sqrt(n_r_max)
+    et_list = np.arange(0, et_max, et_step)
+    n_r_list_sim = (et_list / (2 * g_strength_sim)) ** 2
+
+    setup_plotting()
     # Initialize the simulator
     simulator = TransmonFloquetSimulator(Ec_val, EjEc_val, N_val, w_d_val, g_strength_sim, n_r_list_sim, ng=0)
 
-    result = simulator.find_n_r_critical(branch_index=1)
+    result = simulator.find_n_r_critical(branch_index=1, branches_to_plot=[0, 1, 7, 10, 11])
     print("result:", result)
