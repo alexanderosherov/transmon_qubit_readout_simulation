@@ -1,3 +1,4 @@
+import os
 from typing import Union
 
 import numpy as np
@@ -34,11 +35,11 @@ class FidelitySimulation:
             readout_type: str = "transition",
             num_iterations: int = 50,
             noise_parameters: dict = None,
-            # only needed if IQ_projection_frequency not the same as carrier_frequency of the readout pulse
             readout_dt: float = None,
             plot_pulses: bool = False,
             plot_result: bool = False,
             disable_progress_bar: bool = False,
+            path_for_images: str = None
     ):
         assert IQ_projection_frequency != readout_pulse.carrier_frequency
 
@@ -52,6 +53,7 @@ class FidelitySimulation:
         self.plot_pulses = plot_pulses
         self.plot_result = plot_result
         self.disable_progress_bar = disable_progress_bar
+        self.path_for_images = path_for_images
 
         # Noise parameters based on the paper
         self.amplifier_gains_db = {
@@ -67,7 +69,6 @@ class FidelitySimulation:
                 "quantum_noise": {
                     "type": "quantum",
                     "T_ns": 0.5,  # K
-                    "bandwidth": 1 / self.readout_pulse.pulse_duration,
                     "stage": "TWPA"  # First stage
                 },
                 # This noise is from the HEMT, which is after the TWPA
@@ -87,7 +88,6 @@ class FidelitySimulation:
                     "stage": "RoomTemp"  # Third stage
                 }
             }
-        self.noise_parameters = noise_parameters
         self.noise_parameters = noise_parameters
 
     def run(self) -> float:
@@ -156,14 +156,10 @@ class FidelitySimulation:
             sigma_full_bw = voltage_spectral_density * np.sqrt(1 / (2 * dt))
             unscaled_noise = np.random.normal(0, sigma_full_bw, size=signal_length)
 
-            # The quantum noise is treated as white noise. Its effective bandwidth is
-            # determined by the integration time in the demodulation, not by pre-filtering.
-            # Thermal amplifier noise IS physically band-limited, so we filter it.
+            # Thermal amplifier noise is physically band-limited, so we filter it.
             if noise_type != "quantum":
-                nyquist_freq = 0.5 * sample_rate
-                if bandwidth is not None and bandwidth < nyquist_freq:
-                    b, a = butter(1, bandwidth, btype='lowpass', fs=sample_rate)
-                    unscaled_noise = filtfilt(b, a, unscaled_noise)
+                b, a = butter(1, bandwidth, btype='lowpass', fs=sample_rate)
+                unscaled_noise = filtfilt(b, a, unscaled_noise)
 
             referred_noise = unscaled_noise / preceding_voltage_gain
             total_noise_voltage += referred_noise
@@ -183,7 +179,6 @@ class FidelitySimulation:
         sample_rate = 1 / dt
         t = signal_from_system.t_signal_times
 
-        # --- Define Frequencies ---
         f_ro = self.readout_pulse.carrier_frequency  # Readout frequency (from cryostat)
         f_lo = self.IQ_projection_frequency  # Local Oscillator frequency
         f_if = f_ro - f_lo  # Intermediate Frequency (IF)
@@ -191,7 +186,7 @@ class FidelitySimulation:
         # --- Stage 1: Analog Down-conversion (to IF) ---
         # This stage simulates mixing the signal with the LO and low-pass filtering.
         # The filter must pass f_if but reject the sum frequency (f_ro + f_lo).
-        # A good cutoff is a few times f_if. Let's use 2*f_if as a safe margin.
+        # 2*f_if cutoff as a safe margin.
         cutoff_analog = np.abs(f_if * 2)
         # noinspection PyTupleAssignmentBalance
         b_analog, a_analog = butter(1, cutoff_analog, btype="lowpass", fs=sample_rate)
@@ -212,7 +207,7 @@ class FidelitySimulation:
             lo_I = np.cos(2 * np.pi * f_lo * t)
             lo_Q = -np.sin(2 * np.pi * f_lo * t)
 
-            # Mix down
+            # Mixing
             mixed_analog_I = s * lo_I
             mixed_analog_Q = s * lo_Q
 
@@ -234,9 +229,8 @@ class FidelitySimulation:
 
             # === STAGE 3: INTEGRATION ===
             # Average the now-DC baseband signals to get the final point.
-            # The factor of 4 accounts for the 0.5 amplitude loss at each of the two mixing stages.
-            I_val = 4 * np.mean(I_baseband[::sampling_factor])
-            Q_val = 4 * np.mean(Q_baseband[::sampling_factor])
+            I_val = np.mean(I_baseband[::sampling_factor])
+            Q_val = np.mean(Q_baseband[::sampling_factor])
 
             return I_val, Q_val
 
@@ -247,12 +241,10 @@ class FidelitySimulation:
             tqdm(range(self.num_iterations), postfix=signal_from_system.name, disable=self.disable_progress_bar)
         )
 
-        # Unpack the results
         I, Q = zip(*results)
         return I, Q
 
-    @staticmethod
-    def _plot_decision_regions(model, scaler, X_data, Y_data, title_suffix=""):
+    def _plot_decision_regions(self, model, scaler, X_data, Y_data, title_suffix=""):
         plt.figure(figsize=(6, 8))
 
         # Define plot limits based on the provided X_data
@@ -295,8 +287,9 @@ class FidelitySimulation:
         plt.legend()
         plt.gca().set_aspect('equal', adjustable='box')
         plt.tight_layout()
-        plt.savefig("fidelity_simulation.pdf", bbox_inches='tight')
-        plt.savefig("fidelity_simulation.png", bbox_inches='tight')
+        if self.path_for_images is not None:
+            plt.savefig(os.path.join(self.path_for_images, "fidelity_simulation.pdf"), bbox_inches='tight')
+            plt.savefig(os.path.join(self.path_for_images, "fidelity_simulation.png"), bbox_inches='tight')
         plt.title(f"IQ Projection Plot with Decision Regions {title_suffix}")
         plt.show()
 
@@ -324,7 +317,7 @@ class FidelitySimulation:
                                                             random_state=42
                                                             )
 
-        # Initialize and train a Logistic Regression model on the training data
+        # Initialize and train the model
         model_for_evaluation = LinearDiscriminantAnalysis()
         model_for_evaluation.fit(X_train, Y_train)
 

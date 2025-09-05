@@ -14,7 +14,7 @@ class UnitConverter:
         return 10 ** (power_dbm / 10) * 1e-3
 
     @staticmethod
-    def watts_to_db(power_watts: float) -> float:
+    def watts_to_dbm(power_watts: float) -> float:
         return np.log10(power_watts * 1e3) * 10
 
     def dbm_to_amplitude(self, power_dbm: float, impedance_ohms: float = 50.0) -> float:
@@ -38,20 +38,16 @@ class UnitConverter:
 
         return voltage_peak
 
-    def dbm_to_photons(self, power_dbm, frequency_hz, kappa_total_rad_s):
-        omega_r = 2 * np.pi * frequency_hz
+    # Converts readout pulse's power to the number of photons in the resonator. For squared readout pulse!
+    def power2photons(self, P_in_dbm, t, kappa_total, kappa_ext, omega_d, Delta):
+        part1 = (P_in_dbm * kappa_ext) / (self.H_BAR * omega_d * ((kappa_total / 2) ** 2 + Delta ** 2))
+        part2 = np.abs(1 - np.exp(-(kappa_total / 2 + 1j * Delta) * t)) ** 2
+        return part1 * part2
 
-        power_watts = self.dbm_to_watts(power_dbm)
-        photons_number_in_resonator = power_watts / (self.H_BAR * omega_r * kappa_total_rad_s / 2)
-        return photons_number_in_resonator
-
-    def photons_to_dbm(self, photons_number_in_resonator, frequency_hz, kappa_total_rad_s):
-        omega_r = 2 * np.pi * frequency_hz
-
-        power_watts = photons_number_in_resonator * (self.H_BAR * omega_r * kappa_total_rad_s / 2)
-        power_dbm = np.log10(power_watts / 1e-3) * 10
-
-        return power_dbm
+    def photons2power(self, n_photons, t, kappa_total, kappa_ext, omega_d, Delta):
+        part1 = kappa_ext / (self.H_BAR * omega_d * ((kappa_total / 2) ** 2 + Delta ** 2))
+        part2 = np.abs(1 - np.exp(-(kappa_total / 2 + 1j * Delta) * t)) ** 2
+        return n_photons / (part2 * part1)
 
 
 class S2pUtils:
@@ -101,13 +97,14 @@ class S2pUtils:
         plt.show()
 
     @staticmethod
-    def create_resonator_S21(f_hz, Q_e, Q):
+    def create_resonator_S21(f_hz, Q_e, Q, f_arr: np.ndarray = None):
         def full_model(f, fr, Ql, Qc):
             term1 = Ql / Qc
             term2 = 1 + 2j * Ql * (f - fr) / fr
             return 1 - term1 / term2
 
-        f_arr = np.linspace(f_hz * 0.999, f_hz * 1.001, 10000)
+        if f_arr is None:
+            f_arr = np.linspace(f_hz * 0.999, f_hz * 1.001, 10000)
         S21 = full_model(f_arr, f_hz, Q, Q_e)
         freqs_ntw = rf.Frequency.from_f(f_arr, unit='Hz')
 
@@ -124,14 +121,4 @@ def setup_plotting(dpi=300):
     plt.rcParams['figure.dpi'] = dpi
     plt.rcParams['axes.labelsize'] = 14
 
-    # plt.rcParams['axes.prop_cycle'] = cycler(color=['#669bbc', '#ee6055', '#60d394'])
-    # plt.rcParams['axes.prop_cycle'] = cycler(color=[ '#354757', '#93342D',  '#D88848', ])
-    plt.rcParams['axes.prop_cycle'] = cycler(color=['#2F4858', '#A02829', '#85BBD8', '#97A169', '#C8A0DC'])
-
-# if "__main__" == __name__:
-#     FILE = "data_00000_0_ghz.s2p"
-#
-#     current_path = os.path.abspath("")
-#     data_dir_path = os.path.join(current_path, "data")
-#     file_path = os.path.join(data_dir_path, FILE)
-#     S2pUtils.plot_s2p(file_path)
+    plt.rcParams['axes.prop_cycle'] = cycler(color=['#2F4858', '#A02829', '#85BBD8', '#97A169', '#C8A0DC', '#D88848'])

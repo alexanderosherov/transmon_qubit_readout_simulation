@@ -1,8 +1,9 @@
+import os
 from abc import ABC
 import numpy as np
 import skrf as rf
 from matplotlib import pyplot as plt
-from scipy.signal import czt, CZT
+from scipy.signal import czt
 from scipy.interpolate import interp1d
 
 from fidelity_analysis.utils import UnitConverter
@@ -55,7 +56,7 @@ class Pulse:
                             pulse_samples_number: int,
                             frequencies_edges: tuple,
                             force_use_czt: bool = False,
-                            ) -> (np.ndarray, np.ndarray):
+                            ):
 
         if USE_FFT and not force_use_czt:
             # Scale by dt to approximate the continuous Fourier Transform ---
@@ -164,7 +165,7 @@ class Pulse:
 
         return s_param_processed
 
-    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None):
+    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None, path_for_images: str = None):
         if self.t_signal is None or self.t_signal_times is None:
             print("Cannot plot time domain pulse: t_signal or t_signal_times is not populated.")
             return
@@ -180,7 +181,6 @@ class Pulse:
         ax[1].plot(self.f_signal_frequencies, np.abs(self.f_signal))
         ax[1].set_xlabel('Frequency (Hz)')
         ax[1].set_ylabel('Magnitude (V)')
-
 
         def add_zoom_inset(outer_ax, x_data, y_data, xlim, location, zoom_size=(0.4, 0.4)):
 
@@ -215,7 +215,9 @@ class Pulse:
             )
 
         plt.tight_layout()
-        plt.savefig("pulse.pdf", bbox_inches='tight')
+        if path_for_images is not None:
+            plt.savefig(os.path.join(path_for_images, "pulse.png"), bbox_inches='tight')
+            plt.savefig(os.path.join(path_for_images, "pulse.pdf"), bbox_inches='tight')
         plt.show()
 
 
@@ -273,10 +275,10 @@ class RectangularReadoutPulse(ReadoutPulse):
                                                                             frequencies_edges=self.frequencies_edges
                                                                             )
 
-    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None):
+    def plot_pulse(self, plot_t_edges: tuple = None, plot_f_edges: tuple = None, path_for_images: str = None):
         plot_f_edges = (self.carrier_frequency * 0.999, self.carrier_frequency * 1.001)
         plot_t_edges = (self.pulse_start_time, self.pulse_start_time + self.pulse_duration * 0.001)
-        super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges)
+        super().plot_pulse(plot_t_edges=plot_t_edges, plot_f_edges=plot_f_edges, path_for_images=path_for_images)
 
 
 class ReflectedPulse(Pulse):

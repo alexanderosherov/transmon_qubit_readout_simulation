@@ -1,3 +1,4 @@
+import os
 import time
 
 import numpy as np
@@ -22,6 +23,7 @@ class TransmonFloquetSimulator:
                  g_strength: float,
                  n_r: np.ndarray,
                  ng: float,
+                 images_dir_path: str = None,
                  ):
         """
         Initializes the simulator with transmon and drive parameters.
@@ -51,11 +53,13 @@ class TransmonFloquetSimulator:
         self.H_t_bare = self._hamiltonian_t_shifted(ng)
         self.bare_eigenenergies, self.bare_eigenstates = self.H_t_bare.eigenstates()
 
+        self.images_dir_path = images_dir_path
+
     def find_n_r_critical(self, branch_index: int,
                           plot: bool = True,
                           branches_to_plot: List[int] = None,
                           plot_range: Tuple[int, int] = None,
-                          ) -> int:
+                          ) -> tuple[int | float, float]:
         """
         Args:
             branch_index:
@@ -65,18 +69,17 @@ class TransmonFloquetSimulator:
         Returns:
             n_r_critical: Critical number of photons in the resonator
         """
-        self._calculate_floquet_branches(show_progress=plot)
+        self._calculate_floquet_branches(show_progress=plot, early_stop_branch_index=None if plot else branch_index)
         if plot:
-            self._calculate_averaged_transmon_excitation(show_progress=plot)
+            self._calculate_averaged_transmon_excitation(show_progress=True)
 
-        if plot:
             if branches_to_plot is None:
                 branches_to_plot = [branch_index]
             self._plot_floquet_results_for_the_latest_ng(plot_range, branches_to_plot)
 
-        ac_index = self._find_first_avoided_crossing(branch_index)
+        ac_index, energy = self._find_first_avoided_crossing(branch_index, return_energy_gap=True)
 
-        return ac_index
+        return ac_index, energy
 
     def _hamiltonian_t_shifted(self, ng_val: float) -> Qobj:
         """
@@ -112,7 +115,8 @@ class TransmonFloquetSimulator:
 
         return FloquetBasis(H_list, self.T, args, sort=True, options=dict(nsteps=5000))
 
-    def _calculate_floquet_branches(self, show_progress: bool = False) -> np.ndarray:
+    def _calculate_floquet_branches(self, show_progress: bool = False,
+                                    early_stop_branch_index: int = None) -> np.ndarray:
         """
         Calculates and sorts Floquet quasienergies for varying photon numbers.
 
@@ -121,6 +125,8 @@ class TransmonFloquetSimulator:
         """
         branches = []
         f_modes_list = []
+
+        last_early_stop_check_n_r = None
 
         for n_r in tqdm(self.n_r, desc="Floquet Branches", disable=not show_progress):
             floquet_basis = self._get_floquet_basis(n_r)
@@ -148,6 +154,13 @@ class TransmonFloquetSimulator:
 
             branches.append(sorted_e)
             f_modes_list.append(sorted_m)  # Store sorted modes for next iteration's overlap check
+
+            if early_stop_branch_index is not None and len(branches) > 2 and last_early_stop_check_n_r != int(n_r):
+                last_early_stop_check_n_r = int(n_r)
+                self.floquet_branches = np.array(branches)
+                ac_nr, _ = self._find_first_avoided_crossing(early_stop_branch_index, return_energy_gap=False)
+                if not np.isnan(ac_nr):
+                    break
 
         self.floquet_branches = np.array(branches)
         return self.floquet_branches
@@ -228,7 +241,7 @@ class TransmonFloquetSimulator:
 
         return R_alpha
 
-    def _find_first_avoided_crossing(self, branch_index: int) -> Union[int, float]:
+    def _find_first_avoided_crossing(self, branch_index: int, return_energy_gap) -> tuple[Union[int, float], float]:
         """
         Finds the first "avoided crossing" proxy in a specific Floquet quasienergy branch.
         This is a simplified approach based on derivative sign changes.
@@ -242,7 +255,7 @@ class TransmonFloquetSimulator:
         """
         if self.floquet_branches is None or branch_index >= self.floquet_branches.shape[1]:
             print(f"Error: Floquet branches not calculated or branch_index {branch_index} out of bounds.")
-            return np.nan
+            return np.nan, np.nan
 
         branch = self.floquet_branches[:, branch_index] / self.w_d
         deriv = np.diff(branch, axis=0)
@@ -255,10 +268,26 @@ class TransmonFloquetSimulator:
             if abs(deriv[crossing]) < 0.999:
                 crossings_filtered.append(crossing)
 
+        min_energy_delta_at_crossing = np.nan
+
         if len(crossings_filtered) > 0:
-            return self.n_r[crossings_filtered[0]]
+            crossing = crossings_filtered[0]
+            crossing_index = self.n_r[crossing]
+            energies_delta_at_crossing = []
+
+            # find the energy difference at the crossing
+            if return_energy_gap:
+                for second_branch_index in range(self.floquet_branches.shape[1]):
+                    if second_branch_index != branch_index:
+                        energy_1 = self.floquet_branches[crossing, branch_index] / self.w_d
+                        energy_2 = self.floquet_branches[crossing, second_branch_index] / self.w_d
+                        energies_delta_at_crossing.append(abs(energy_1 - energy_2))
+
+                min_energy_delta_at_crossing = min(energies_delta_at_crossing)
+            return crossing_index, min_energy_delta_at_crossing
+
         else:
-            return np.nan
+            return np.nan, np.nan
 
     def _plot_floquet_results_for_the_latest_ng(self, plot_range: Tuple[int, int],
                                                 branches_to_plot: List[int] = None) -> None:
@@ -287,7 +316,7 @@ class TransmonFloquetSimulator:
         # colors = plt.cm.tab10.colors
         # plot_colors = [colors[i % len(colors)] for i in range(len(branches_to_plot))]
 
-        # --- Bottom Plot (Averaged Transmon Excitation) ---
+        # --- Top Plot (Averaged Transmon Excitation) ---
         for i in range(plot_range[0], min(plot_range[1], num_branches)):
             if i not in branches_to_plot:
                 axs[0].plot(self.n_r, self.averaged_excitation[:, i],
@@ -297,17 +326,15 @@ class TransmonFloquetSimulator:
             axs[0].plot(self.n_r, self.averaged_excitation[:, i_t],
                         linewidth=2.5, label=fr'${i_t}_t$', zorder=2)  # color=plot_colors[idx],
 
-        # axs[0].set_xlabel(r'$\bar{n}$', fontsize=12)
         axs[0].set_ylabel('$N_t$', fontsize=12)
         axs[0].legend(bbox_to_anchor=(0.5, 1.0), loc='lower center', ncol=len(branches_to_plot),
                       fontsize=15, frameon=False, columnspacing=1.5, handlelength=1.5)
         # Axis styling for bottom plot
         axs[0].grid(True, linestyle='--', alpha=0.5, zorder=0)  # Add a subtle grid
-        # axs[0].spines['top'].set_visible(False)
-        # axs[0].spines['right'].set_visible(False)
         axs[0].tick_params(axis='both', which='major', labelsize=10, length=4, width=1)
+        axs[0].text(0.01, 0.976, "a)", transform=axs[0].transAxes, va="top", ha="left", fontsize=13)
 
-        # --- Top Plot (Floquet Quasienergies) ---
+        # --- Bottom Plot (Floquet Quasienergies) ---
         for i in range(plot_range[0], min(plot_range[1], num_branches)):
             if i not in branches_to_plot:
                 axs[1].plot(self.n_r, self.floquet_branches[:, i] / self.w_d,
@@ -317,19 +344,17 @@ class TransmonFloquetSimulator:
             axs[1].plot(self.n_r, self.floquet_branches[:, i_t] / self.w_d,
                         linewidth=2.5, label=f'$B_{i_t}$', zorder=2)  # color=plot_colors[idx],
 
-        # axs[1].legend(bbox_to_anchor=(0.5, 1.0), loc='lower center', ncol=len(branches_to_plot),
-        #               fontsize=15, frameon=False, columnspacing=1.5, handlelength=1.5)
-        axs[1].set_xlabel(r'$\bar{n}$', fontsize=12)
+        axs[1].set_xlabel(r'$\bar{n}_r$', fontsize=12)
         axs[1].set_ylabel(r'$\epsilon_i / \omega_\text{d}$', fontsize=12)
         axs[1].set_ylim(-0.5, 0.5)
 
         # Axis styling for top plot
         axs[1].grid(True, linestyle='--', alpha=0.5, zorder=0)
-        # axs[1].spines['top'].set_visible(False)
-        # axs[1].spines['right'].set_visible(False)
         axs[1].tick_params(axis='both', which='major', labelsize=10, length=4, width=1)
+        axs[1].text(0.01, 0.976, "b)", transform=axs[1].transAxes, va="top", ha="left", fontsize=13)
+        axs[1].set_xlim(self.n_r.min(), self.n_r.max())
 
-        plt.savefig(f'floquet_branches_{time.strftime("%Y%m%d-%H%M%S")}.pdf')
+        plt.savefig(os.path.join(self.images_dir_path, f'floquet_branches_{time.strftime("%Y%m%d-%H%M%S")}.pdf'));
         plt.show()
 
 
