@@ -1,5 +1,3 @@
-import os
-
 import skrf as rf
 import matplotlib.pyplot as plt
 import numpy as np

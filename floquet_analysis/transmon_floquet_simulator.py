@@ -9,6 +9,15 @@ from typing import List, Tuple, Union, Dict
 
 from fidelity_analysis.utils import setup_plotting
 
+"""
+FLOQUET ANALYSIS OF THE DRIVEN TRANSMON on the paper
+
+Dumas, Marie Frédérique, Benjamin Groleau-Paré, Alexander McDonald, et al. 2024. 
+“Measurement-Induced Transmon Ionization.” 
+Physical Review X 14 (4): 041023. https://doi.org/10.1103/PhysRevX.14.041023.
+
+"""
+
 
 class TransmonFloquetSimulator:
     """
@@ -185,7 +194,8 @@ class TransmonFloquetSimulator:
         for n_r in tqdm(self.n_r, desc="Avg Excitation", disable=not show_progress):
             floquet_basis = self._get_floquet_basis(n_r)
 
-            # First, get Floquet modes at t=0 and sort them consistently
+            # First, get Floquet modes at t=0 (because we consider very slowly changing envelope of the pulse)
+            # and sort them consistently
             f_modes_at_t0 = floquet_basis.mode(0, False)
             sorted_f_modes_t0 = []
             sorted_i = []
@@ -345,7 +355,7 @@ class TransmonFloquetSimulator:
                         linewidth=2.5, label=f'$B_{i_t}$', zorder=2)  # color=plot_colors[idx],
 
         axs[1].set_xlabel(r'$\bar{n}_r$', fontsize=12)
-        axs[1].set_ylabel(r'$\epsilon_i / \omega_\text{d}$', fontsize=12)
+        axs[1].set_ylabel(r'$ϵ_i / \omega_\text{d}$', fontsize=12)
         axs[1].set_ylim(-0.5, 0.5)
 
         # Axis styling for top plot
@@ -354,7 +364,10 @@ class TransmonFloquetSimulator:
         axs[1].text(0.01, 0.976, "b)", transform=axs[1].transAxes, va="top", ha="left", fontsize=13)
         axs[1].set_xlim(self.n_r.min(), self.n_r.max())
 
-        plt.savefig(os.path.join(self.images_dir_path, f'floquet_branches_{time.strftime("%Y%m%d-%H%M%S")}.pdf'));
+        image_name = f'floquet_branches_{time.strftime("%Y%m%d-%H%M%S")}'
+        image_path = image_name if self.images_dir_path is None else os.path.join(self.images_dir_path, image_name)
+        plt.savefig(f'{image_path}.pdf')
+        plt.savefig(f'{image_path}.png')
         plt.show()
 
 
@@ -385,5 +398,5 @@ if __name__ == "__main__":
     # Initialize the simulator
     simulator = TransmonFloquetSimulator(Ec_val, EjEc_val, N_val, w_d_val, g_strength_sim, n_r_list_sim, ng=0)
 
-    result = simulator.find_n_r_critical(branch_index=1, branches_to_plot=[0, 1, 7, 10, 11])
+    result = simulator.find_n_r_critical(branch_index=1, branches_to_plot=[0, 1, 7, 10, 11], plot=True)
     print("result:", result)

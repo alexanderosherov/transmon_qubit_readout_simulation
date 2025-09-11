@@ -18,9 +18,9 @@ def reformate_to_s2p(input_fp: str, output_fp: str, base_frequency: float):
         signal = copy.deepcopy(data_xr['data'].squeeze().isel(iter=i).data)
 
         ntwk = rf.Network()
-        ntwk.f = f #* 1e-9
+        ntwk.f = f * 1e-9
         s = np.zeros((len(signal), 2, 2), dtype=np.complex64)
-        s[:, 1, 0] = signal  * 1e3
+        s[:, 1, 0] = signal
         ntwk.s = s
 
         output_dir = os.path.dirname(output[i])
