@@ -2,7 +2,7 @@ import skrf as rf
 import matplotlib.pyplot as plt
 import numpy as np
 from cycler import cycler
-
+from scipy.integrate import quad
 
 class UnitConverter:
     H_BAR = 1.054571817e-34
@@ -47,6 +47,15 @@ class UnitConverter:
         part2 = np.abs(1 - np.exp(-(kappa_total / 2 + 1j * Delta) * t)) ** 2
         return n_photons / (part2 * part1)
 
+    def averagePhotons2power(self, n_photons, t_pulse, kappa_total, kappa_ext, omega_d, Delta):
+        part1 = kappa_ext / (self.H_BAR * omega_d * ((kappa_total / 2) ** 2 + Delta ** 2))
+
+        integrand = lambda t: np.abs(1 - np.exp(-(kappa_total / 2 + 1j * Delta) * t)) ** 2
+        total_integral, _ = quad(integrand, 0, t_pulse)
+
+        avg_buildup_factor = total_integral / t_pulse
+
+        return n_photons / (avg_buildup_factor * part1)
 
 class S2pUtils:
     @staticmethod
