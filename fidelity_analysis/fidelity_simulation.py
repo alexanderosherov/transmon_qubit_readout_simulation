@@ -74,7 +74,7 @@ class FidelitySimulation:
                 # This noise is from the HEMT, which is after the TWPA
                 "thermal_noise_hemt": {
                     "type": "thermal",
-                    "T": 54,  # K
+                    "T": 1.5,  # K
                     "bandwidth": 6e9,  # Hz
                     "resistance": 50.0,
                     "stage": "HEMT"  # Second stage
@@ -82,7 +82,7 @@ class FidelitySimulation:
                 # This noise is from the room temp amp, after TWPA and HEMT
                 "thermal_noise_room_temp": {
                     "type": "thermal",
-                    "T": 1.5,  # K (This value from the paper is unusually low for a 300K amp, but we follow it)
+                    "T": 54,  # K (This value from the paper is unusually low for a 300K amp, but we follow it)
                     "bandwidth": 6e9,  # Hz
                     "resistance": 50.0,
                     "stage": "RoomTemp"  # Third stage
@@ -149,12 +149,19 @@ class FidelitySimulation:
 
             voltage_spectral_density = np.sqrt(4 * k * T * R)
 
-            # np.sqrt(1 / (2 * dt)) is the Effective Noise Bandwidth
-            sigma_full_bw = voltage_spectral_density * np.sqrt(1 / (2 * dt))
+            nyquist_freq = sample_rate / 2
+            sigma_full_bw = voltage_spectral_density * np.sqrt(nyquist_freq)
             unscaled_noise = np.random.normal(0, sigma_full_bw, size=signal_length)
 
-            b, a = butter(1, bandwidth, btype='lowpass', fs=sample_rate)
-            unscaled_noise = filtfilt(b, a, unscaled_noise)
+            low_cutoff = self.readout_pulse.carrier_frequency - (bandwidth / 2)
+            high_cutoff = self.readout_pulse.carrier_frequency + (bandwidth / 2)
+
+            if high_cutoff >= nyquist_freq:
+                raise ValueError("The filter's high cutoff frequency is at or above the Nyquist frequency.")
+
+            a, b = butter(1, [low_cutoff, high_cutoff], btype='bandpass', fs=sample_rate)
+
+            unscaled_noise = filtfilt(a, b, unscaled_noise)
 
             referred_noise = unscaled_noise / preceding_voltage_gain
             total_noise_voltage += referred_noise
@@ -201,7 +208,7 @@ class FidelitySimulation:
             noise = self._create_noise(signal_from_system=signal_from_system)
             s = (signal_from_system.t_signal + noise).real
 
-            if f_if == 0: # Homodyne detection
+            if f_if == 0:  # Homodyne detection
                 lo_I = np.cos(2 * np.pi * f_ro * t)
                 lo_Q = -np.sin(2 * np.pi * f_ro * t)
 
@@ -211,7 +218,7 @@ class FidelitySimulation:
                 # Low-pass filter to get the baseband signal
                 I_baseband = filtfilt(b_lp, a_lp, mixed_I)
                 Q_baseband = filtfilt(b_lp, a_lp, mixed_Q)
-            else: # Heterodyne detection
+            else:  # Heterodyne detection
                 lo_I = np.cos(2 * np.pi * f_lo * t)
                 lo_Q = -np.sin(2 * np.pi * f_lo * t)
 
